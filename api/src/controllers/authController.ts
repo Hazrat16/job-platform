@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
+import { sendVerificationEmail } from "../utils/email.js";
 
 const JWT_SECRET = process.env.JWT_SECRET as string;
 
@@ -27,6 +28,13 @@ export const registerUser = async (req: Request, res: Response) => {
 
     // TODO: Queue email sending here
     console.log(`Verification token for ${email}: ${verificationToken}`);
+
+    const emailSent = await sendVerificationEmail(email, verificationToken);
+    if (!emailSent) {
+      return res
+        .status(500)
+        .json({ error: "Failed to send verification email" });
+    }
 
     return res
       .status(201)
