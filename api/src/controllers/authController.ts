@@ -1,4 +1,3 @@
-// src/controllers/authController.ts
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { Request, Response } from "express";
