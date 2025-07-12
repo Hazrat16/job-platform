@@ -1,7 +1,9 @@
 import { Router } from "express";
 import {
+  forgotPassword,
   loginUser,
   registerUser,
+  resetPassword,
   verifyEmail,
 } from "../controllers/authController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
@@ -18,6 +20,8 @@ const router = Router();
 router.post("/register", validateRegisterInput, asyncHandler(registerUser));
 router.get("/verify-email", asyncHandler(verifyEmail));
 router.post("/login", asyncHandler(loginUser));
+router.post("/forgot-password", asyncHandler(forgotPassword));
+router.post("/reset-password", asyncHandler(resetPassword));
 
 // Example of a protected route
 router.get("/protected", authMiddleware, (req, res) => {
