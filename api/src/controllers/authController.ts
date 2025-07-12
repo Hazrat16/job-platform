@@ -3,9 +3,12 @@ import crypto from "crypto";
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
-import { sendVerificationEmail } from "../utils/email.js";
+import {
+  sendResetPasswordEmail,
+  sendVerificationEmail,
+} from "../utils/email.js";
 
-const JWT_SECRET = process.env.JWT_SECRET as string;
+const JWT_SECRET = process.env["JWT_SECRET"] as string;
 
 export const registerUser = async (req: Request, res: Response) => {
   try {
@@ -56,7 +59,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
     if (!user) return res.status(400).json({ error: "Invalid token" });
 
     user.isVerified = true;
-    user.verificationToken = undefined;
+    user.verificationToken = undefined as any;
     await user.save();
 
     return res.json({ message: "Email verified successfully!" });
@@ -90,5 +93,56 @@ export const loginUser = async (req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Login failed" });
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const token = crypto.randomBytes(32).toString("hex");
+    user.resetPasswordToken = token;
+    user.resetPasswordExpires = new Date(Date.now() + 3600000);
+    await user.save();
+
+    const resetLink = `http://localhost:3000/reset-password?token=${token}`;
+    const emailSent = await sendResetPasswordEmail(user.email, resetLink);
+
+    if (!emailSent) {
+      return res.status(500).json({ error: "Failed to send reset email." });
+    }
+
+    res.json({ message: "Password reset link sent to your email." });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user)
+      return res.status(400).json({ error: "Invalid or expired token." });
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.resetPasswordToken = undefined as any;
+    user.resetPasswordExpires = undefined as any;
+    await user.save();
+
+    res
+      .status(200)
+      .json({ success: true, message: "Password reset successful" });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 };

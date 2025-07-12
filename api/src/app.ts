@@ -1,12 +1,14 @@
 import express from "express";
 import authRoutes from "./routes/authRoutes.js";
 
+console.log("✅ app.ts loaded");
+
 const app = express();
 
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 
-// Error handler middleware (optional but recommended)
+// Error handler
 app.use(
   (
     err: any,

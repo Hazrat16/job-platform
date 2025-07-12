@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 
 export interface IUser extends Document {
   name: string;
@@ -7,6 +7,8 @@ export interface IUser extends Document {
   role: string;
   isVerified: boolean;
   verificationToken?: string;
+  resetPasswordToken?: string;
+  resetPasswordExpires?: Date;
 }
 
 const userSchema = new Schema<IUser>({
@@ -16,6 +18,8 @@ const userSchema = new Schema<IUser>({
   role: { type: String, required: true },
   isVerified: { type: Boolean, default: false },
   verificationToken: { type: String },
+  resetPasswordToken: { type: String },
+  resetPasswordExpires: { type: Date },
 });
 
 const User = mongoose.model<IUser>("User", userSchema);
