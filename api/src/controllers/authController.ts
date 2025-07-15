@@ -52,10 +52,14 @@ export const verifyEmail = async (req: Request, res: Response) => {
   try {
     const { token } = req.query;
 
+    console.log("Token received:", token);
+
     if (!token || typeof token !== "string")
       return res.status(400).json({ error: "Token is required" });
 
     const user = await User.findOne({ verificationToken: token });
+    console.log("User found:", user);
+
     if (!user) return res.status(400).json({ error: "Invalid token" });
 
     user.isVerified = true;
@@ -64,7 +68,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
 
     return res.json({ message: "Email verified successfully!" });
   } catch (err) {
-    console.error(err);
+    console.error(" Email verification failed:", err);
     return res.status(500).json({ error: "Email verification failed" });
   }
 };
