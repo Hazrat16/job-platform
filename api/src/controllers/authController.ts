@@ -13,6 +13,7 @@ const JWT_SECRET = process.env["JWT_SECRET"] as string;
 export const registerUser = async (req: Request, res: Response) => {
   try {
     const { name, email, password, role } = req.body;
+    const file = req.file;
 
     const existingUser = await User.findOne({ email });
     if (existingUser)
@@ -21,12 +22,21 @@ export const registerUser = async (req: Request, res: Response) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const verificationToken = crypto.randomBytes(32).toString("hex");
 
+    let photoURL: string | undefined = undefined;
+    // set uploaded photo URL
+    if (file && "path" in file) {
+      photoURL =
+        (file as any).path || (file as any).url || (file as any).secure_url;
+      console.log("Photo URL:", photoURL);
+    }
+
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       role,
       verificationToken,
+      photo: photoURL,
     });
 
     // TODO: Queue email sending here

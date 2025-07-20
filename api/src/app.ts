@@ -1,5 +1,6 @@
 import express from "express";
 import authRoutes from "./routes/authRoutes.js";
+import uploadRoute from "./routes/uploadRoute.js";
 
 console.log("✅ app.ts loaded");
 
@@ -7,6 +8,7 @@ const app = express();
 
 app.use(express.json());
 app.use("/api/auth", authRoutes);
+app.use("/api/upload", uploadRoute);
 
 // Error handler
 app.use(
