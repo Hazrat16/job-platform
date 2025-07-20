@@ -6,7 +6,9 @@ import {
   resetPassword,
   verifyEmail,
 } from "../controllers/authController.js";
+import { uploadProfilePhoto } from "../controllers/userController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
+import upload from "../middlewares/upload.js";
 import { validateRegisterInput } from "../middlewares/validateRegisterInput.js";
 
 function asyncHandler(fn: any) {
@@ -17,11 +19,22 @@ function asyncHandler(fn: any) {
 
 const router = Router();
 
-router.post("/register", validateRegisterInput, asyncHandler(registerUser));
+router.post(
+  "/register",
+  upload.single("photo"),
+  validateRegisterInput,
+  asyncHandler(registerUser)
+);
 router.get("/verify-email", asyncHandler(verifyEmail));
 router.post("/login", asyncHandler(loginUser));
 router.post("/forgot-password", asyncHandler(forgotPassword));
 router.post("/reset-password", asyncHandler(resetPassword));
+router.post(
+  "/upload-photo",
+  authMiddleware,
+  upload.single("photo"),
+  uploadProfilePhoto
+);
 
 // Example of a protected route
 router.get("/protected", authMiddleware, (req, res) => {
