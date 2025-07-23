@@ -24,6 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm install
+        working-directory: ./api
 
       - name: Fetch all branches
         run: git fetch --all
