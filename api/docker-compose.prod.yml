@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  job-platform-api:
+    container_name: job-platform-api-prod
+    image: hazrat17/job-platform-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      MONGO_URL: mongodb+srv://<DB_USER>:<DB_PASSWORD>@cluster0.mongodb.net/urban-eats?retryWrites=true&w=majority
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:5.0
+    container_name: mongo-prod
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - job-platform-api
+
+volumes:
+  mongo-data:
