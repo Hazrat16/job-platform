@@ -15,7 +15,7 @@ const transporter = nodemailer.createTransport({
 
 transporter.verify(function (error, success) {
   if (error) {
-    console.log("Not logged in: ", error.message);
+    console.error("Not logged in: ", error.message);
   } else {
     console.log("Logged in and ready to send emails");
   }
