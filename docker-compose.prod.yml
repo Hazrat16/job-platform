@@ -5,7 +5,7 @@ services:
     container_name: job-platform-api-prod
     image: hazrat17/job-platform-api:latest
     build:
-      context: .
+      context: ./api
       dockerfile: Dockerfile
       target: production
     ports:
