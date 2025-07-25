@@ -1,13 +1,18 @@
-FROM node:18-alpine
+# syntax=docker/dockerfile:1
+FROM node:18-alpine AS development
 
-WORKDIR /usr/src/app
+WORKDIR /app
 
-COPY package*.json ./
+# Copy both files
+COPY package.json package-lock.json ./
 
+# Install deps
 RUN npm ci
 
+# Copy all source files
 COPY . .
 
-EXPOSE 3000
+# Expose port
+EXPOSE 5000
 
-CMD ["npm", "start"]
+CMD ["npm", "run", "dev"]
