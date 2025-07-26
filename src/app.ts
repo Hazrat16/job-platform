@@ -21,7 +21,6 @@ app.get("/api/test", (req, res) => {
 
 // Remove this line since startChatServer.ts handles server startup
 // startServer();
-
 app.use(
   (
     err: any,
