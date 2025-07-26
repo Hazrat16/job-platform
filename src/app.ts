@@ -17,7 +17,6 @@ app.get("/api/test", (req, res) => {
   });
 });
 
-// Error handler
 app.use(
   (
     err: any,
