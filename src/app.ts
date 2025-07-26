@@ -10,7 +10,13 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/upload", uploadRoute);
 
-// Error handler
+app.get("/api/test", (req, res) => {
+  res.json({
+    message: " Test route is working!...... 🚀",
+    timestamp: new Date(),
+  });
+});
+
 app.use(
   (
     err: any,
