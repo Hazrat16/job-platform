@@ -12,7 +12,6 @@ export const startServer = async () => {
     } catch (error) {
       console.log("⚠️  RabbitMQ not available, continuing without it...");
     }
-    
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
