@@ -1,8 +1,8 @@
 import express from "express";
 import sendChatMessage from "./chat/chatController.js";
-import { connectRabbitMQ } from "./chat/rabbitMQ.js";
 import authRoutes from "./routes/authRoutes.js";
 import uploadRoute from "./routes/uploadRoute.js";
+import { startServer } from "./startChatServer.js";
 
 console.log("✅ app.ts loaded");
 
@@ -18,19 +18,6 @@ app.get("/api/test", (req, res) => {
     message: " Test route is working!...... 🚀",
   });
 });
-
-const PORT = process.env["PORT"];
-
-const startServer = async () => {
-  try {
-    await connectRabbitMQ(); // ✅ ensure this is called
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${PORT}`);
-    });
-  } catch (err) {
-    console.error("❌ Failed to start server:", err);
-  }
-};
 
 startServer();
 
