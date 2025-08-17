@@ -1,9 +1,13 @@
 import mongoose from "mongoose";
-import rabbitMQService from "./rabbitMQ.js";
 import ChatMessage from "../models/chatModel.js";
 import Conversation from "../models/conversationModel.js";
-import { ChatMessagePayload, ChatEventPayload, NotificationPayload } from "./producer.js";
-import { ChatProducer } from "./producer.js";
+import {
+  ChatEventPayload,
+  ChatMessagePayload,
+  ChatProducer,
+  NotificationPayload,
+} from "./producer.js";
+import rabbitMQService from "./rabbitMQ.js";
 
 export class ChatConsumer {
   /**
@@ -12,16 +16,16 @@ export class ChatConsumer {
   static async startConsuming(): Promise<void> {
     try {
       console.log("🚀 Starting chat consumers...");
-      
+
       // Start consuming chat messages
       await this.consumeChatMessages();
-      
+
       // Start consuming notifications
       await this.consumeNotifications();
-      
+
       // Start consuming chat events
       await this.consumeChatEvents();
-      
+
       console.log("✅ All chat consumers started successfully");
     } catch (error) {
       console.error("❌ Failed to start chat consumers:", error);
@@ -37,15 +41,17 @@ export class ChatConsumer {
       if (!message) return;
 
       try {
-        const content = JSON.parse(message.content.toString()) as ChatMessagePayload & { id: string; status: string };
+        const content = JSON.parse(
+          message.content.toString()
+        ) as ChatMessagePayload & { id: string; status: string };
         console.log("📩 Processing chat message:", content.id);
 
         // Save message to database
         const savedMessage = await this.saveMessageToDatabase(content);
-        
+
         // Update conversation
         await this.updateConversation(content, savedMessage._id);
-        
+
         // Send delivery confirmation
         await ChatProducer.publishEvent({
           type: "message_delivered",
@@ -66,14 +72,13 @@ export class ChatConsumer {
         });
 
         console.log(`✅ Chat message ${content.id} processed successfully`);
-        
+
         // Acknowledge message
         const channel = await rabbitMQService.getChannel();
         channel.ack(message);
-        
       } catch (error) {
         console.error("❌ Error processing chat message:", error);
-        
+
         // Negative acknowledge and requeue if it's a temporary error
         const channel = await rabbitMQService.getChannel();
         channel.nack(message, false, true);
@@ -85,36 +90,42 @@ export class ChatConsumer {
    * Consume notifications from the queue
    */
   private static async consumeNotifications(): Promise<void> {
-    await rabbitMQService.consumeQueue("chat-notifications", async (message) => {
-      if (!message) return;
+    await rabbitMQService.consumeQueue(
+      "chat-notifications",
+      async (message) => {
+        if (!message) return;
 
-      try {
-        const content = JSON.parse(message.content.toString()) as NotificationPayload & { id: string; status: string };
-        console.log("📢 Processing notification:", content.id);
+        try {
+          const content = JSON.parse(
+            message.content.toString()
+          ) as NotificationPayload & { id: string; status: string };
+          console.log("📢 Processing notification:", content.id);
 
-        // Here you would integrate with your notification service
-        // For now, we'll just log it
-        console.log(`📢 Notification for ${content.userId}: ${content.title} - ${content.body}`);
-        
-        // In a real implementation, you might:
-        // - Send push notification
-        // - Send email
-        // - Send SMS
-        // - Update in-app notification center
-        
-        console.log(`✅ Notification ${content.id} processed successfully`);
-        
-        // Acknowledge message
-        const channel = await rabbitMQService.getChannel();
-        channel.ack(message);
-        
-      } catch (error) {
-        console.error("❌ Error processing notification:", error);
-        
-        const channel = await rabbitMQService.getChannel();
-        channel.nack(message, false, true);
+          // Here you would integrate with your notification service
+          // For now, we'll just log it
+          console.log(
+            `📢 Notification for ${content.userId}: ${content.title} - ${content.body}`
+          );
+
+          // In a real implementation, you might:
+          // - Send push notification
+          // - Send email
+          // - Send SMS
+          // - Update in-app notification center
+
+          console.log(`✅ Notification ${content.id} processed successfully`);
+
+          // Acknowledge message
+          const channel = await rabbitMQService.getChannel();
+          channel.ack(message);
+        } catch (error) {
+          console.error("❌ Error processing notification:", error);
+
+          const channel = await rabbitMQService.getChannel();
+          channel.nack(message, false, true);
+        }
       }
-    });
+    );
   }
 
   /**
@@ -125,7 +136,9 @@ export class ChatConsumer {
       if (!message) return;
 
       try {
-        const content = JSON.parse(message.content.toString()) as ChatEventPayload & { id: string };
+        const content = JSON.parse(
+          message.content.toString()
+        ) as ChatEventPayload & { id: string };
         console.log("📡 Processing chat event:", content.type);
 
         // Handle different event types
@@ -146,14 +159,13 @@ export class ChatConsumer {
         }
 
         console.log(`✅ Chat event ${content.id} processed successfully`);
-        
+
         // Acknowledge message
         const channel = await rabbitMQService.getChannel();
         channel.ack(message);
-        
       } catch (error) {
         console.error("❌ Error processing chat event:", error);
-        
+
         const channel = await rabbitMQService.getChannel();
         channel.nack(message, false, true);
       }
@@ -163,7 +175,9 @@ export class ChatConsumer {
   /**
    * Save message to database
    */
-  private static async saveMessageToDatabase(messageData: ChatMessagePayload): Promise<any> {
+  private static async saveMessageToDatabase(
+    messageData: ChatMessagePayload
+  ): Promise<any> {
     try {
       const message = new ChatMessage({
         senderId: messageData.senderId,
@@ -177,7 +191,7 @@ export class ChatConsumer {
 
       const savedMessage = await message.save();
       console.log(`💾 Message saved to database: ${savedMessage._id}`);
-      
+
       return savedMessage;
     } catch (error) {
       console.error("❌ Failed to save message to database:", error);
@@ -188,10 +202,16 @@ export class ChatConsumer {
   /**
    * Update conversation with new message
    */
-  private static async updateConversation(messageData: ChatMessagePayload, messageId: mongoose.Types.ObjectId): Promise<void> {
+  private static async updateConversation(
+    messageData: ChatMessagePayload,
+    messageId: mongoose.Types.ObjectId
+  ): Promise<void> {
     try {
-      const conversationId = this.generateConversationId(messageData.senderId, messageData.receiverId);
-      
+      const conversationId = this.generateConversationId(
+        messageData.senderId,
+        messageData.receiverId
+      );
+
       let conversation = await Conversation.findOne({
         participants: { $all: [messageData.senderId, messageData.receiverId] },
         isGroupChat: false,
@@ -209,11 +229,12 @@ export class ChatConsumer {
       // Update conversation
       conversation.lastMessage = messageId;
       conversation.lastMessageAt = messageData.timestamp;
-      conversation.incrementUnreadCount(new mongoose.Types.ObjectId(messageData.receiverId));
-      
+      conversation.incrementUnreadCount(
+        new mongoose.Types.ObjectId(messageData.receiverId)
+      );
+
       await conversation.save();
       console.log(`💾 Conversation updated: ${conversation._id}`);
-      
     } catch (error) {
       console.error("❌ Failed to update conversation:", error);
       throw error;
@@ -223,7 +244,9 @@ export class ChatConsumer {
   /**
    * Handle message read event
    */
-  private static async handleMessageRead(event: ChatEventPayload): Promise<void> {
+  private static async handleMessageRead(
+    event: ChatEventPayload
+  ): Promise<void> {
     try {
       // Mark messages as read in database
       await ChatMessage.updateMany(
@@ -259,14 +282,18 @@ export class ChatConsumer {
   /**
    * Handle typing indicator
    */
-  private static async handleTypingIndicator(event: ChatEventPayload): Promise<void> {
+  private static async handleTypingIndicator(
+    event: ChatEventPayload
+  ): Promise<void> {
     try {
       // In a real implementation, you might:
       // - Store typing state in Redis for real-time access
       // - Broadcast to other users in the conversation
       // - Handle typing timeout
-      
-      console.log(`⌨️ User ${event.userId} ${event.type === 'typing_start' ? 'started' : 'stopped'} typing`);
+
+      console.log(
+        `⌨️ User ${event.userId} ${event.type === "typing_start" ? "started" : "stopped"} typing`
+      );
     } catch (error) {
       console.error("❌ Failed to handle typing indicator:", error);
       throw error;
@@ -276,14 +303,18 @@ export class ChatConsumer {
   /**
    * Handle user status change
    */
-  private static async handleUserStatus(event: ChatEventPayload): Promise<void> {
+  private static async handleUserStatus(
+    event: ChatEventPayload
+  ): Promise<void> {
     try {
       // In a real implementation, you might:
       // - Update user status in database
       // - Store online status in Redis
       // - Notify other users about status change
-      
-      console.log(`👤 User ${event.userId} is now ${event.type === 'user_online' ? 'online' : 'offline'}`);
+
+      console.log(
+        `👤 User ${event.userId} is now ${event.type === "user_online" ? "online" : "offline"}`
+      );
     } catch (error) {
       console.error("❌ Failed to handle user status:", error);
       throw error;
@@ -293,7 +324,10 @@ export class ChatConsumer {
   /**
    * Generate conversation ID for two users
    */
-  private static generateConversationId(userId1: string, userId2: string): string {
+  private static generateConversationId(
+    userId1: string,
+    userId2: string
+  ): string {
     const sortedIds = [userId1, userId2].sort();
     return `${sortedIds[0]}-${sortedIds[1]}`;
   }

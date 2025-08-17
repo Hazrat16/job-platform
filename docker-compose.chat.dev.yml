@@ -1,0 +1,116 @@
+version: "3.8"
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: chat_mongodb_dev
+    restart: unless-stopped
+    ports:
+      - "27018:27017" # Changed from 27017:27017 to avoid conflicts
+    environment:
+      - MONGO_INITDB_DATABASE=job-platform
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin123
+    volumes:
+      - mongodb_data_dev:/data/db
+    networks:
+      - chat_network_dev
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: chat_rabbitmq_dev
+    restart: unless-stopped
+    ports:
+      - "5673:5672" # AMQP protocol (changed from 5672:5672)
+      - "15673:15672" # Management UI (changed from 15672:15672)
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin123
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - rabbitmq_data_dev:/var/lib/rabbitmq
+      - rabbitmq_logs_dev:/var/log/rabbitmq
+    networks:
+      - chat_network_dev
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7.2-alpine
+    container_name: chat_redis_dev
+    restart: unless-stopped
+    ports:
+      - "6380:6379" # Changed from 6379:6379 to avoid conflicts
+    volumes:
+      - redis_data_dev:/data
+    networks:
+      - chat_network_dev
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Node.js Chat Application (Development)
+  chat_app_dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.chat.dev
+    container_name: chat_app_dev
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+      - "9229:9229" # Node.js debug port
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - MONGODB_URI=mongodb://admin:admin123@mongodb:27017/job-platform?authSource=admin
+      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - CLIENT_URL=http://localhost:3000
+      - DEBUG=true
+    volumes:
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./uploads:/app/uploads
+      - /app/node_modules
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - chat_network_dev
+    command: npm run dev
+
+volumes:
+  mongodb_data_dev:
+    driver: local
+  rabbitmq_data_dev:
+    driver: local
+  rabbitmq_logs_dev:
+    driver: local
+  redis_data_dev:
+    driver: local
+
+networks:
+  chat_network_dev:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
