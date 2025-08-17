@@ -1,11 +1,11 @@
 import express from "express";
 import { ChatController } from "../chat/chatController.js";
-import { authenticateToken } from "../middlewares/authMiddleware.js";
+import { authMiddleware } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
 // Apply authentication middleware to all chat routes
-router.use(authenticateToken);
+router.use(authMiddleware);
 
 // Send a message
 router.post("/send", ChatController.sendMessage);
@@ -17,7 +17,10 @@ router.get("/conversation/:userId", ChatController.getConversation);
 router.get("/conversations", ChatController.getConversations);
 
 // Get message history for a conversation
-router.get("/conversation/:conversationId/messages", ChatController.getMessageHistory);
+router.get(
+  "/conversation/:conversationId/messages",
+  ChatController.getMessageHistory
+);
 
 // Search messages
 router.get("/search", ChatController.searchMessages);

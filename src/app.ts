@@ -1,9 +1,7 @@
 import express from "express";
 import authRoutes from "./routes/authRoutes.js";
-import uploadRoute from "./routes/uploadRoute.js";
 import chatRoutes from "./routes/chatRoutes.js";
-import { startServer } from "./startChatServer.js";
-
+import uploadRoute from "./routes/uploadRoute.js";
 console.log("✅ app.ts loaded");
 
 const app = express();
