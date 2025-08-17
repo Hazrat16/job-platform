@@ -13,11 +13,13 @@ services:
     environment:
       NODE_ENV: development
       MONGO_URL: mongodb://mongo:27017/job-platform-api
+      RABBITMQ_URL: amqp://rabbitmq:5672
     volumes:
       - .:/app
       - /app/node_modules
     depends_on:
       - mongo
+      - rabbitmq
 
   mongo:
     image: mongo:5.0
@@ -27,5 +29,18 @@ services:
     volumes:
       - mongo-data:/data/db
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-dev
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
 volumes:
   mongo-data:
+  rabbitmq-data:

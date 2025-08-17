@@ -19,7 +19,8 @@ app.get("/api/test", (req, res) => {
   });
 });
 
-startServer();
+// Remove this line since startChatServer.ts handles server startup
+// startServer();
 
 app.use(
   (

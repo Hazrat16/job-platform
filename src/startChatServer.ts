@@ -1,12 +1,18 @@
-// src/startServer.ts
-import app from "./app"; // or wherever your Express app is defined
-import { connectRabbitMQ } from "./chat/rabbitMQ";
+// src/startChatServer.ts
+import app from "./app.js"; // or wherever your Express app is defined
+import { connectRabbitMQ } from "./chat/rabbitMQ.js";
 
 const PORT = process.env["PORT"];
 
 export const startServer = async () => {
   try {
-    await connectRabbitMQ();
+    // Try to connect to RabbitMQ, but don't fail if it's not available
+    try {
+      await connectRabbitMQ();
+    } catch (error) {
+      console.log("⚠️  RabbitMQ not available, continuing without it...");
+    }
+    
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
