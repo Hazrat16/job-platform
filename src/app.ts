@@ -1,9 +1,7 @@
 import express from "express";
-import sendChatMessage from "./chat/chatController.js";
 import authRoutes from "./routes/authRoutes.js";
+import chatRoutes from "./routes/chatRoutes.js";
 import uploadRoute from "./routes/uploadRoute.js";
-import { startServer } from "./startChatServer.js";
-
 console.log("✅ app.ts loaded");
 
 const app = express();
@@ -11,15 +9,13 @@ const app = express();
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/upload", uploadRoute);
-app.post("/api/chat", sendChatMessage);
+app.use("/api/chat", chatRoutes);
 
 app.get("/api/test", (req, res) => {
   res.json({
     message: " Test route is working!...... 🚀",
   });
 });
-
-startServer();
 
 app.use(
   (
