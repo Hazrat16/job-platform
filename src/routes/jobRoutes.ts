@@ -8,6 +8,7 @@ import {
   deleteJob,
   getJobById,
   getJobs,
+  getMyJobs,
   updateJob,
 } from "../controllers/jobController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
@@ -16,6 +17,7 @@ import upload from "../middlewares/upload.js";
 const router = Router();
 
 router.get("/", getJobs);
+router.get("/mine", authMiddleware, getMyJobs);
 router.get("/:id", getJobById);
 
 router.post("/", authMiddleware, createJob);

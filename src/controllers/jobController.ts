@@ -84,6 +84,44 @@ export const getJobs = async (req: Request, res: Response) => {
   }
 };
 
+export const getMyJobs = async (req: Request, res: Response) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: "Database is currently unavailable",
+      });
+    }
+
+    const user = (req as any).user as { id?: string; role?: string };
+    if (user.role !== "employer") {
+      return res.status(403).json({
+        success: false,
+        message: "Only employers can list their posted jobs",
+      });
+    }
+
+    const jobs = await Job.find({ employer: user.id })
+      .populate("employer", "name email role isVerified photo")
+      .sort({ createdAt: -1 });
+
+    return res.json({
+      success: true,
+      message: "Your jobs fetched successfully",
+      data: jobs,
+      meta: {
+        page: 1,
+        limit: jobs.length,
+        total: jobs.length,
+        totalPages: 1,
+      },
+    });
+  } catch (error) {
+    console.error("getMyJobs error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch your jobs" });
+  }
+};
+
 export const getJobById = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {

@@ -16,6 +16,10 @@ export const registerUser = async (req: Request, res: Response) => {
     const { name, email, password, role } = req.body;
     const file = req.file;
 
+    if (role !== "jobseeker" && role !== "employer") {
+      return res.status(400).json({ error: "Invalid role. Use jobseeker or employer." });
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser)
       return res.status(400).json({ error: "Email already exists" });
