@@ -1,5 +1,25 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+export interface IExperienceItem {
+  title: string;
+  company: string;
+  location?: string;
+  startDate?: string;
+  endDate?: string;
+  current?: boolean;
+  description?: string;
+}
+
+export interface IEducationItem {
+  school: string;
+  degree: string;
+  field?: string;
+  startYear?: string;
+  endYear?: string;
+  current?: boolean;
+  description?: string;
+}
+
 export interface IUserProfile {
   headline?: string;
   bio?: string;
@@ -10,7 +30,52 @@ export interface IUserProfile {
   github?: string;
   portfolio?: string;
   resumeUrl?: string;
+  experience?: IExperienceItem[];
+  education?: IEducationItem[];
 }
+
+const experienceItemSchema = new Schema<IExperienceItem>(
+  {
+    title: { type: String, default: "", trim: true },
+    company: { type: String, default: "", trim: true },
+    location: { type: String, default: "", trim: true },
+    startDate: { type: String, default: "", trim: true },
+    endDate: { type: String, default: "", trim: true },
+    current: { type: Boolean, default: false },
+    description: { type: String, default: "", trim: true },
+  },
+  { _id: true },
+);
+
+const educationItemSchema = new Schema<IEducationItem>(
+  {
+    school: { type: String, default: "", trim: true },
+    degree: { type: String, default: "", trim: true },
+    field: { type: String, default: "", trim: true },
+    startYear: { type: String, default: "", trim: true },
+    endYear: { type: String, default: "", trim: true },
+    current: { type: Boolean, default: false },
+    description: { type: String, default: "", trim: true },
+  },
+  { _id: true },
+);
+
+const profileSchema = new Schema<IUserProfile>(
+  {
+    headline: { type: String, default: "", trim: true },
+    bio: { type: String, default: "", trim: true },
+    phone: { type: String, default: "", trim: true },
+    location: { type: String, default: "", trim: true },
+    skills: { type: [String], default: [] },
+    linkedIn: { type: String, default: "", trim: true },
+    github: { type: String, default: "", trim: true },
+    portfolio: { type: String, default: "", trim: true },
+    resumeUrl: { type: String, default: "", trim: true },
+    experience: { type: [experienceItemSchema], default: [] },
+    education: { type: [educationItemSchema], default: [] },
+  },
+  { _id: false },
+);
 
 export interface IUser extends Document {
   name: string;
@@ -24,21 +89,6 @@ export interface IUser extends Document {
   photo?: string;
   profile?: IUserProfile;
 }
-
-const profileSchema = new Schema<IUserProfile>(
-  {
-    headline: { type: String, default: "", trim: true },
-    bio: { type: String, default: "", trim: true },
-    phone: { type: String, default: "", trim: true },
-    location: { type: String, default: "", trim: true },
-    skills: { type: [String], default: [] },
-    linkedIn: { type: String, default: "", trim: true },
-    github: { type: String, default: "", trim: true },
-    portfolio: { type: String, default: "", trim: true },
-    resumeUrl: { type: String, default: "", trim: true },
-  },
-  { _id: false },
-);
 
 const userSchema = new Schema<IUser>(
   {
