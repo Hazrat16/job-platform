@@ -1,4 +1,8 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { createServer } from "http";
+import dns from "dns";
 import mongoose from "mongoose";
 import app from "./app.js";
 import { ChatConsumer } from "./chat/consumer.js";
@@ -8,38 +12,73 @@ import { WebSocketService } from "./chat/websocketService.js";
 const PORT = process.env["PORT"] || 5000;
 
 export const startServer = async () => {
+  let mongoConnected = false;
+  let chatStackEnabled = false;
   try {
     console.log("🚀 Starting advanced chat server...");
 
     // Connect to MongoDB first
     const MONGODB_URI =
-      process.env["MONGODB_URI"] || "mongodb://localhost:27018/job-platform";
+      process.env["MONGODB_URI"] ||
+      process.env["MONGO_URI"] ||
+      "mongodb://localhost:27018/job-platform";
+
+    if (MONGODB_URI.startsWith("mongodb+srv://")) {
+      // Public resolvers are often more reliable for SRV records in local dev.
+      dns.setServers(["8.8.8.8", "1.1.1.1"]);
+    }
+
     console.log("🔄 Connecting to MongoDB...");
-    await mongoose.connect(MONGODB_URI);
-    console.log("✅ MongoDB connected");
+    try {
+      await mongoose.connect(MONGODB_URI);
+      mongoConnected = true;
+      console.log("✅ MongoDB connected");
+    } catch (mongoError) {
+      console.error("⚠️ MongoDB connection failed, starting in degraded mode:");
+      console.error(mongoError);
+    }
 
     // Create HTTP server
     const httpServer = createServer(app);
 
-    // Initialize WebSocket service
-    const webSocketService = new WebSocketService(httpServer);
-    console.log("✅ WebSocket service initialized");
+    if (mongoConnected) {
+      try {
+        new WebSocketService(httpServer);
+        console.log("✅ WebSocket service initialized");
 
-    // Connect to RabbitMQ
-    await connectRabbitMQ();
-    console.log("✅ RabbitMQ connected");
+        await connectRabbitMQ();
+        console.log("✅ RabbitMQ connected");
 
-    // Start consuming messages
-    await ChatConsumer.startConsuming();
-    console.log("✅ Chat consumers started");
+        await ChatConsumer.startConsuming();
+        console.log("✅ Chat consumers started");
+        chatStackEnabled = true;
+      } catch (chatError) {
+        console.error(
+          "⚠️ Chat stack (RabbitMQ/WebSocket/consumer) failed; REST API will still run:",
+        );
+        console.error(chatError);
+      }
+    } else {
+      console.log("⚠️ Chat services are disabled until MongoDB is reachable");
+    }
 
-    // Start HTTP server
-    httpServer.listen(PORT, () => {
+    const host = process.env["HOST"] || "0.0.0.0";
+
+    // Start HTTP server (0.0.0.0 so WSL/Docker/LAN can reach it)
+    httpServer.listen(Number(PORT), host, () => {
       console.log(
-        `🚀 Advanced Chat Server running on http://localhost:${PORT}`
+        `🚀 API server running on http://${host === "0.0.0.0" ? "localhost" : host}:${PORT}`
       );
-      console.log(`🔌 WebSocket server ready for connections`);
-      console.log(`📡 RabbitMQ consumers active`);
+      if (chatStackEnabled) {
+        console.log(`🔌 WebSocket server ready for connections`);
+        console.log(`📡 RabbitMQ consumers active`);
+      } else if (mongoConnected) {
+        console.log(
+          `⚠️ MongoDB OK but chat stack offline (start RabbitMQ or set RABBITMQ_URL)`,
+        );
+      } else {
+        console.log(`⚠️ Running in degraded mode (no database/chat)`);
+      }
     });
 
     // Graceful shutdown

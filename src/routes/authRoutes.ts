@@ -6,6 +6,8 @@ import {
   resetPassword,
   verifyEmail,
 } from "../controllers/authController.js";
+import User from "../models/userModel.js";
+import { toPublicUser } from "../utils/userPublic.js";
 import { uploadProfilePhoto } from "../controllers/userController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 import upload from "../middlewares/upload.js";
@@ -36,9 +38,24 @@ router.post(
   uploadProfilePhoto
 );
 
-// Example of a protected route
-router.get("/protected", authMiddleware, (req, res) => {
-  res.json({ message: "You are authorized", user: (req as any).user });
-});
+router.get(
+  "/protected",
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const userId = (req as any).user?.id as string | undefined;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    return res.json({
+      success: true,
+      message: "Authorized",
+      data: toPublicUser(user),
+    });
+  }),
+);
 
 export default router;

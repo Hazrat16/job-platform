@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import User, { IUser } from "../models/userModel.js";
+import { toPublicUser } from "../utils/userPublic.js";
 
 export const uploadProfilePhoto = async (req: Request, res: Response) => {
   try {
@@ -19,8 +20,12 @@ export const uploadProfilePhoto = async (req: Request, res: Response) => {
     )) as IUser;
 
     return res.json({
+      success: true,
       message: "Profile photo updated successfully",
-      photo: updatedUser.photo,
+      data: {
+        photo: updatedUser.photo,
+        user: toPublicUser(updatedUser),
+      },
     });
   } catch (err) {
     console.error(err);

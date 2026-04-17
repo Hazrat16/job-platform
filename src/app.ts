@@ -1,15 +1,44 @@
 import express from "express";
+import applicationRoutes from "./routes/applicationRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
+import jobRoutes from "./routes/jobRoutes.js";
 import uploadRoute from "./routes/uploadRoute.js";
 console.log("✅ app.ts loaded");
 
 const app = express();
 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With",
+  );
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 app.use(express.json());
 app.use("/api/auth", authRoutes);
+app.use("/api/profile", profileRoutes);
 app.use("/api/upload", uploadRoute);
 app.use("/api/chat", chatRoutes);
+app.use("/api/jobs", jobRoutes);
+app.use("/api/applications", applicationRoutes);
 
 app.get("/api/test", (req, res) => {
   res.json({
@@ -27,7 +56,10 @@ app.use(
     next: express.NextFunction
   ) => {
     console.error("Unhandled error:", err);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({
+      success: false,
+      message: err?.message || "Something went wrong",
+    });
   }
 );
 

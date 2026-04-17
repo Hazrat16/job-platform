@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
+import { toPublicUser } from "../utils/userPublic.js";
 import {
   sendResetPasswordEmail,
   sendVerificationEmail,
@@ -102,7 +103,7 @@ export const loginUser = async (req: Request, res: Response) => {
 
     return res.json({
       token,
-      user: { name: user.name, role: user.role, email: user.email },
+      user: toPublicUser(user),
     });
   } catch (err) {
     console.error(err);
