@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Request, Response } from "express";
 import Application from "../models/applicationModel.js";
 import Job from "../models/jobModel.js";
+import { createNotification } from "../services/notificationService.js";
 
 export const applyForJob = async (req: Request, res: Response) => {
   try {
@@ -57,9 +58,28 @@ export const applyForJob = async (req: Request, res: Response) => {
     });
 
     const populatedApplication = await application.populate([
-      { path: "job", select: "title company location type salary status" },
+      { path: "job", select: "title company location type salary status employer" },
       { path: "applicant", select: "name email role photo" },
     ]);
+
+    const pop = populatedApplication as unknown as {
+      applicant?: { name?: string };
+      job?: { title?: string };
+    };
+    const applicantName = pop.applicant?.name ?? "Someone";
+    const jobTitle = pop.job?.title ?? "a job";
+    const employerId = String(job.employer);
+    await createNotification({
+      userId: employerId,
+      type: "application_received",
+      title: "New application",
+      body: `${applicantName} applied for ${jobTitle}.`,
+      href: `/my-jobs/${jobId}/applications`,
+      metadata: {
+        jobId: String(jobId),
+        applicationId: String(application._id),
+      },
+    });
 
     return res.status(201).json({
       success: true,
@@ -135,7 +155,8 @@ export const getJobApplications = async (req: Request, res: Response) => {
     }
 
     const applications = await Application.find({ job: jobId })
-      .populate("applicant", "name email role photo")
+      .populate("job", "title company employer status")
+      .populate("applicant", "name email role photo profile")
       .sort({ createdAt: -1 });
 
     return res.json({
@@ -200,9 +221,31 @@ export const updateApplicationStatus = async (req: Request, res: Response) => {
     await application.save();
 
     const populatedApplication = await application.populate([
-      { path: "job", select: "title company location type salary status" },
-      { path: "applicant", select: "name email role photo" },
+      { path: "job", select: "title company location type salary status employer" },
+      { path: "applicant", select: "name email role photo profile" },
     ]);
+
+    const pop = populatedApplication as unknown as {
+      applicant?: { _id?: mongoose.Types.ObjectId };
+      job?: { _id?: mongoose.Types.ObjectId; title?: string };
+    };
+    const applicantId = pop.applicant?._id ? String(pop.applicant._id) : "";
+    const jobTitle = pop.job?.title ?? "your application";
+    const jobIdStr = pop.job?._id ? String(pop.job._id) : "";
+    if (applicantId) {
+      await createNotification({
+        userId: applicantId,
+        type: "application_status",
+        title: "Application status updated",
+        body: `Your application for "${jobTitle}" is now ${status}.`,
+        href: "/applications",
+        metadata: {
+          applicationId,
+          jobId: jobIdStr,
+          status,
+        },
+      });
+    }
 
     return res.json({
       success: true,

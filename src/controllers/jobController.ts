@@ -105,10 +105,29 @@ export const getMyJobs = async (req: Request, res: Response) => {
       .populate("employer", "name email role isVerified photo")
       .sort({ createdAt: -1 });
 
+    const jobIds = jobs.map((j) => j._id);
+    const countRows =
+      jobIds.length === 0
+        ? []
+        : await Application.aggregate([
+            { $match: { job: { $in: jobIds } } },
+            { $group: { _id: "$job", applicationCount: { $sum: 1 } } },
+          ]);
+    const countMap = new Map(
+      countRows.map((r) => [String(r._id), r.applicationCount]),
+    );
+    const data = jobs.map((job) => {
+      const plain = job.toObject();
+      return {
+        ...plain,
+        applicationCount: countMap.get(String(job._id)) ?? 0,
+      };
+    });
+
     return res.json({
       success: true,
       message: "Your jobs fetched successfully",
-      data: jobs,
+      data,
       meta: {
         page: 1,
         limit: jobs.length,
