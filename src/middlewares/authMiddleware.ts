@@ -15,7 +15,14 @@ export const authMiddleware = (
 
   const token = authHeader.split(" ")[1];
   const secret = process.env["JWT_SECRET"];
-  if (!secret) throw new Error("JWT_SECRET is not defined");
+  if (!secret) {
+    console.error("authMiddleware: JWT_SECRET is not set");
+    res.status(500).json({
+      error: "Server misconfiguration",
+      message: "JWT_SECRET is not defined on the API server",
+    });
+    return;
+  }
 
   try {
     const decoded = jwt.verify(token as string, secret);
