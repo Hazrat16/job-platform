@@ -11,10 +11,19 @@ import jobRoutes from "./routes/jobRoutes.js";
 import uploadRoute from "./routes/uploadRoute.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 import { requestContext } from "./middlewares/requestContext.js";
+import {
+  queueJobClosingSoonNotifications,
+  startNotificationWorker,
+} from "./services/notificationService.js";
 console.log("✅ app.ts loaded");
 
 const app = express();
 app.use(requestContext);
+startNotificationWorker();
+void queueJobClosingSoonNotifications();
+setInterval(() => {
+  void queueJobClosingSoonNotifications();
+}, 6 * 60 * 60 * 1000);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;

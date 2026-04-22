@@ -1,6 +1,9 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
-export type NotificationType = "application_received" | "application_status";
+export type NotificationType =
+  | "application_received"
+  | "application_status"
+  | "job_closing_soon";
 
 export interface INotification extends Document {
   userId: Types.ObjectId;
@@ -25,7 +28,7 @@ const notificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ["application_received", "application_status"],
+      enum: ["application_received", "application_status", "job_closing_soon"],
       required: true,
     },
     title: { type: String, required: true, trim: true, maxlength: 200 },

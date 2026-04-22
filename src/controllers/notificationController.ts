@@ -1,19 +1,18 @@
 import mongoose from "mongoose";
 import { Request, Response } from "express";
 import Notification from "../models/notificationModel.js";
+import NotificationPreference from "../models/notificationPreferenceModel.js";
+import { fail, ok } from "../utils/http.js";
 
 export const listNotifications = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: "Database is currently unavailable",
-      });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const userId = (req as any).user?.id as string | undefined;
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+      return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
     }
 
     const unreadOnly = req.query["unreadOnly"] === "true";
@@ -27,35 +26,27 @@ export const listNotifications = async (req: Request, res: Response) => {
       Notification.countDocuments({ userId, read: false }),
     ]);
 
-    return res.json({
-      success: true,
-      message: "Notifications loaded",
-      data: items,
-      meta: { unreadCount },
-    });
+    return ok(res, items, "Notifications loaded", 200, { unreadCount });
   } catch (err) {
     console.error("listNotifications:", err);
-    return res.status(500).json({ success: false, message: "Failed to load notifications" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to load notifications");
   }
 };
 
 export const markNotificationRead = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: "Database is currently unavailable",
-      });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const userId = (req as any).user?.id as string | undefined;
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+      return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
     }
 
     const id = req.params["notificationId"];
     if (!id || !mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ success: false, message: "Invalid notification id" });
+      return fail(res, 400, "BAD_REQUEST", "Invalid notification id");
     }
 
     const doc = await Notification.findOneAndUpdate(
@@ -65,46 +56,93 @@ export const markNotificationRead = async (req: Request, res: Response) => {
     ).lean();
 
     if (!doc) {
-      return res.status(404).json({ success: false, message: "Notification not found" });
+      return fail(res, 404, "NOT_FOUND", "Notification not found");
     }
 
     const unreadCount = await Notification.countDocuments({ userId, read: false });
 
-    return res.json({
-      success: true,
-      message: "Marked as read",
-      data: doc,
-      meta: { unreadCount },
-    });
+    return ok(res, doc, "Marked as read", 200, { unreadCount });
   } catch (err) {
     console.error("markNotificationRead:", err);
-    return res.status(500).json({ success: false, message: "Failed to update notification" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to update notification");
   }
 };
 
 export const markAllNotificationsRead = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: "Database is currently unavailable",
-      });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const userId = (req as any).user?.id as string | undefined;
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+      return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
     }
 
     await Notification.updateMany({ userId, read: false }, { read: true });
 
-    return res.json({
-      success: true,
-      message: "All notifications marked read",
-      meta: { unreadCount: 0 },
-    });
+    return ok(res, null, "All notifications marked read", 200, { unreadCount: 0 });
   } catch (err) {
     console.error("markAllNotificationsRead:", err);
-    return res.status(500).json({ success: false, message: "Failed to mark all read" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to mark all read");
+  }
+};
+
+export const getNotificationPreferences = async (req: Request, res: Response) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
+    }
+    const userId = (req as any).user?.id as string | undefined;
+    if (!userId) return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
+
+    const prefs = await NotificationPreference.findOneAndUpdate(
+      { userId },
+      { $setOnInsert: { userId } },
+      { upsert: true, new: true },
+    ).lean();
+
+    return ok(res, prefs, "Notification preferences loaded");
+  } catch (err) {
+    console.error("getNotificationPreferences:", err);
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to load notification preferences");
+  }
+};
+
+export const updateNotificationPreferences = async (req: Request, res: Response) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
+    }
+    const userId = (req as any).user?.id as string | undefined;
+    if (!userId) return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
+
+    const body = req.body as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
+    const channels = ["inApp", "email"] as const;
+    const keys = ["applicationReceived", "applicationStatus", "jobClosingSoon"] as const;
+    for (const channel of channels) {
+      const value = body[channel] as Record<string, unknown> | undefined;
+      if (!value || typeof value !== "object") continue;
+      for (const key of keys) {
+        if (typeof value[key] === "boolean") {
+          patch[`${channel}.${key}`] = value[key];
+        }
+      }
+    }
+
+    const prefs = await NotificationPreference.findOneAndUpdate(
+      { userId },
+      {
+        $setOnInsert: { userId },
+        ...(Object.keys(patch).length > 0 ? { $set: patch } : {}),
+      },
+      { upsert: true, new: true },
+    ).lean();
+
+    return ok(res, prefs, "Notification preferences updated");
+  } catch (err) {
+    console.error("updateNotificationPreferences:", err);
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to update notification preferences");
   }
 };
