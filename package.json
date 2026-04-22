@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec \"tsx src/startChatServer.ts\"",
     "start": "tsx src/startChatServer.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@types/socket.io": "^3.0.2",

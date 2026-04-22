@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { fail, HttpError } from "../utils/http.js";
+import { logError } from "../utils/logger.js";
 
 export function notFoundHandler(req: Request, res: Response) {
   return fail(res, 404, "NOT_FOUND", `Route not found: ${req.method} ${req.originalUrl}`);
@@ -17,7 +18,7 @@ export function errorHandler(
     return fail(res, err.status, err.code, err.message, err.details);
   }
 
-  console.error("Unhandled error:", {
+  logError("Unhandled error", {
     requestId: res.locals["requestId"],
     method: req.method,
     path: req.originalUrl,

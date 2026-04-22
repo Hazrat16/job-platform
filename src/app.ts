@@ -15,7 +15,10 @@ import {
   queueJobClosingSoonNotifications,
   startNotificationWorker,
 } from "./services/notificationService.js";
-console.log("✅ app.ts loaded");
+import mongoose from "mongoose";
+import { logError, logInfo } from "./utils/logger.js";
+import { snapshotMetrics, trackHttp } from "./utils/metrics.js";
+logInfo("app.ts loaded");
 
 const app = express();
 app.use(requestContext);
@@ -26,6 +29,19 @@ setInterval(() => {
 }, 6 * 60 * 60 * 1000);
 
 app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    const latencyMs = Date.now() - startedAt;
+    trackHttp(res.statusCode, latencyMs);
+    logInfo("http_request", {
+      requestId: res.locals["requestId"] as string | undefined,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+      latencyMs,
+    });
+  });
+
   const origin = req.headers.origin;
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -64,6 +80,49 @@ app.get("/api/test", (req, res) => {
   res.json({
     message: " Test route is working!...... 🚀",
   });
+});
+
+app.get("/api/health", (_req, res) => {
+  const dbConnected = mongoose.connection.readyState === 1;
+  const status = dbConnected ? "ok" : "degraded";
+  res.status(dbConnected ? 200 : 503).json({
+    success: dbConnected,
+    status,
+    services: {
+      api: "up",
+      db: dbConnected ? "up" : "down",
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/api/health/ready", (_req, res) => {
+  const ready = mongoose.connection.readyState === 1;
+  if (!ready) {
+    return res.status(503).json({
+      success: false,
+      status: "not_ready",
+      reason: "Database not connected",
+    });
+  }
+  return res.json({ success: true, status: "ready" });
+});
+
+app.get("/api/metrics", (_req, res) => {
+  try {
+    return res.json({
+      success: true,
+      message: "Metrics snapshot",
+      data: snapshotMetrics(),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logError("metrics_snapshot_failed", { error });
+    return res.status(500).json({
+      success: false,
+      message: "Could not collect metrics",
+    });
+  }
 });
 app.use(notFoundHandler);
 app.use(errorHandler);
