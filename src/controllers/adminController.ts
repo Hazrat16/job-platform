@@ -30,13 +30,38 @@ export const moderateUser = async (req: Request, res: Response) => {
     }
     const admin = (req as any).user as { id?: string; role?: string };
     const userId = req.params["id"];
-    const { action } = req.body as { action?: "suspend" | "unsuspend" | "soft_delete" };
+    const { action } = req.body as {
+      action?: "suspend" | "unsuspend" | "soft_delete" | "promote_to_admin";
+    };
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return fail(res, 400, "BAD_REQUEST", "Invalid user id");
     }
     const user = await User.findById(userId);
     if (!user) return fail(res, 404, "NOT_FOUND", "User not found");
-    if (user.role === "admin") return fail(res, 403, "FORBIDDEN", "Admin account cannot be moderated");
+    if (action === "promote_to_admin") {
+      if (user.role === "admin") {
+        return fail(res, 409, "CONFLICT", "User is already an admin");
+      }
+      const update: Record<string, unknown> = {
+        role: "admin",
+        isSuspended: false,
+        isVerified: true,
+      };
+      await User.updateOne(
+        { _id: userId },
+        {
+          $set: update,
+          $unset: { suspendedAt: 1, deletedAt: 1, deletedBy: 1 },
+        },
+      );
+      const promoted = await User.findById(userId);
+      if (!promoted) return fail(res, 404, "NOT_FOUND", "User not found");
+      return ok(res, promoted, "User promoted to admin");
+    }
+
+    if (user.role === "admin") {
+      return fail(res, 403, "FORBIDDEN", "Admin account cannot be moderated");
+    }
 
     if (action === "suspend") {
       user.isSuspended = true;

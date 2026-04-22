@@ -241,6 +241,77 @@ export const logoutAllSessions = async (req: Request, res: Response) => {
   }
 };
 
+export const bootstrapAdmin = async (req: Request, res: Response) => {
+  try {
+    const configuredSecret = process.env["ADMIN_BOOTSTRAP_SECRET"];
+    if (!configuredSecret) {
+      return fail(
+        res,
+        503,
+        "SERVICE_UNAVAILABLE",
+        "Admin bootstrap is not configured",
+      );
+    }
+
+    const providedSecret =
+      req.header("x-admin-bootstrap-secret") ||
+      (typeof req.body?.secret === "string" ? req.body.secret : "");
+    if (!providedSecret || providedSecret !== configuredSecret) {
+      return fail(res, 403, "FORBIDDEN", "Invalid bootstrap secret");
+    }
+
+    const email =
+      typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "Administrator";
+    const password =
+      typeof req.body?.password === "string" ? req.body.password : "";
+
+    if (!email || !email.includes("@")) {
+      return fail(res, 400, "BAD_REQUEST", "Valid admin email is required");
+    }
+
+    const existing = await User.findOne({ email });
+    if (existing) {
+      existing.role = "admin";
+      existing.isVerified = true;
+      await existing.save();
+      return ok(
+        res,
+        { id: String(existing._id), email: existing.email, promoted: true },
+        "Existing user promoted to admin",
+      );
+    }
+
+    if (password.length < 6) {
+      return fail(
+        res,
+        400,
+        "BAD_REQUEST",
+        "Password (min 6 chars) is required for new admin user",
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const adminUser = await User.create({
+      name: name || "Administrator",
+      email,
+      password: hashedPassword,
+      role: "admin",
+      isVerified: true,
+    });
+
+    return ok(
+      res,
+      { id: String(adminUser._id), email: adminUser.email, created: true },
+      "Admin user created",
+      201,
+    );
+  } catch (err) {
+    console.error("bootstrapAdmin error:", err);
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to bootstrap admin user");
+  }
+};
+
 export const forgotPassword = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;

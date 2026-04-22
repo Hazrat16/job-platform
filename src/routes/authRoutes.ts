@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import {
+  bootstrapAdmin,
   forgotPassword,
   loginUser,
   logoutAllSessions,
@@ -31,6 +32,12 @@ function asyncHandler(fn: any) {
 }
 
 const router = Router();
+
+router.post(
+  "/bootstrap-admin",
+  rateLimit({ key: "auth-bootstrap-admin", windowMs: 60_000, max: 5 }),
+  asyncHandler(bootstrapAdmin),
+);
 
 router.post(
   "/register",
