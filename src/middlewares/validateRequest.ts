@@ -130,6 +130,28 @@ export function validateUpdateJobInput(req: Request, res: Response, next: NextFu
   next();
 }
 
+export function validateJobLifecycleStatusInput(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  const { status } = req.body as Record<string, unknown>;
+  const normalized = String(status || "").toLowerCase();
+  const aliases: Record<string, string> = {
+    published: "active",
+  };
+  const mapped = aliases[normalized] || normalized;
+  const allowedStatuses = ["draft", "active", "closed"];
+  if (!allowedStatuses.includes(mapped)) {
+    fail(res, 400, "BAD_REQUEST", "Invalid job status", {
+      allowedStatuses: ["draft", "published(active)", "closed"],
+    });
+    return;
+  }
+  req.body["status"] = mapped;
+  next();
+}
+
 export function validateApplicationStatusInput(
   req: Request,
   res: Response,

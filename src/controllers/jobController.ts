@@ -40,8 +40,8 @@ export const getJobs = async (req: Request, res: Response) => {
     const skip = (pageNumber - 1) * limitNumber;
 
     const filter: Record<string, unknown> = {};
-
-    if (status) filter["status"] = status;
+    const normalizedStatus = status === "published" ? "active" : status;
+    if (normalizedStatus) filter["status"] = normalizedStatus;
     if (type) filter["type"] = type;
     if (location) filter["location"] = { $regex: location, $options: "i" };
     if (search) filter["$text"] = { $search: search };
@@ -226,5 +226,45 @@ export const deleteJob = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("deleteJob error:", error);
     return fail(res, 500, "INTERNAL_ERROR", "Failed to delete job");
+  }
+};
+
+export const updateJobLifecycleStatus = async (req: Request, res: Response) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
+    }
+
+    const user = (req as any).user as { id?: string; role?: string };
+    const job = await Job.findById(req.params["id"]);
+    if (!job) {
+      return fail(res, 404, "NOT_FOUND", "Job not found");
+    }
+    if (user.role !== "employer" || job.employer.toString() !== user.id) {
+      return fail(res, 403, "FORBIDDEN", "Not authorized to update this job");
+    }
+
+    const { status } = req.body as { status: "draft" | "active" | "closed" };
+    if (job.status === status) {
+      const sameStatusJob = await job.populate(
+        "employer",
+        "name email role isVerified photo",
+      );
+      return ok(res, sameStatusJob, "Job status unchanged");
+    }
+
+    job.status = status;
+    await job.save();
+    const populatedJob = await job.populate(
+      "employer",
+      "name email role isVerified photo",
+    );
+
+    const statusLabel =
+      status === "active" ? "published" : status === "closed" ? "closed" : "saved as draft";
+    return ok(res, populatedJob, `Job ${statusLabel} successfully`);
+  } catch (error) {
+    console.error("updateJobLifecycleStatus error:", error);
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to update job status");
   }
 };

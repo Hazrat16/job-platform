@@ -10,6 +10,7 @@ import {
   getJobs,
   getMyJobs,
   updateJob,
+  updateJobLifecycleStatus,
 } from "../controllers/jobController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 import { rateLimit } from "../middlewares/rateLimit.js";
@@ -17,6 +18,7 @@ import { requireRole } from "../middlewares/rbac.js";
 import upload from "../middlewares/upload.js";
 import {
   validateCreateJobInput,
+  validateJobLifecycleStatusInput,
   validateUpdateJobInput,
 } from "../middlewares/validateRequest.js";
 
@@ -39,6 +41,13 @@ router.put(
   requireRole("employer"),
   validateUpdateJobInput,
   updateJob,
+);
+router.patch(
+  "/:id/status",
+  authMiddleware,
+  requireRole("employer"),
+  validateJobLifecycleStatusInput,
+  updateJobLifecycleStatus,
 );
 router.delete("/:id", authMiddleware, requireRole("employer"), deleteJob);
 

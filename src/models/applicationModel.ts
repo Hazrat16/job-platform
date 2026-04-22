@@ -1,14 +1,34 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
+export interface IApplicationStatusHistoryEntry {
+  status: "pending" | "reviewed" | "shortlisted" | "rejected" | "accepted";
+  changedAt: Date;
+  note?: string;
+}
+
 export interface IApplication extends Document {
   job: Types.ObjectId;
   applicant: Types.ObjectId;
   resume: string;
   coverLetter?: string;
   status: "pending" | "reviewed" | "shortlisted" | "rejected" | "accepted";
+  statusHistory: IApplicationStatusHistoryEntry[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+const applicationStatusHistorySchema = new Schema<IApplicationStatusHistoryEntry>(
+  {
+    status: {
+      type: String,
+      enum: ["pending", "reviewed", "shortlisted", "rejected", "accepted"],
+      required: true,
+    },
+    changedAt: { type: Date, required: true, default: Date.now },
+    note: { type: String, trim: true },
+  },
+  { _id: false },
+);
 
 const applicationSchema = new Schema<IApplication>(
   {
@@ -26,6 +46,10 @@ const applicationSchema = new Schema<IApplication>(
       enum: ["pending", "reviewed", "shortlisted", "rejected", "accepted"],
       default: "pending",
       required: true,
+    },
+    statusHistory: {
+      type: [applicationStatusHistorySchema],
+      default: () => [{ status: "pending", changedAt: new Date() }],
     },
   },
   { timestamps: true }

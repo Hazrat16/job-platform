@@ -5,6 +5,17 @@ import Job from "../models/jobModel.js";
 import { createNotification } from "../services/notificationService.js";
 import { fail, ok } from "../utils/http.js";
 
+const APPLICATION_STATUS_LABEL: Record<
+  "pending" | "reviewed" | "shortlisted" | "rejected" | "accepted",
+  string
+> = {
+  pending: "pending review",
+  reviewed: "under review",
+  shortlisted: "shortlisted",
+  rejected: "not selected",
+  accepted: "accepted",
+};
+
 export const applyForJob = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
@@ -42,6 +53,13 @@ export const applyForJob = async (req: Request, res: Response) => {
       resume,
       coverLetter,
       status: "pending",
+      statusHistory: [
+        {
+          status: "pending",
+          changedAt: new Date(),
+          note: "Application submitted",
+        },
+      ],
     });
 
     const populatedApplication = await application.populate([
@@ -159,7 +177,20 @@ export const updateApplicationStatus = async (req: Request, res: Response) => {
       return fail(res, 403, "FORBIDDEN", "Not authorized to update this status");
     }
 
-    application.status = status;
+    const nextStatus = status as
+      | "pending"
+      | "reviewed"
+      | "shortlisted"
+      | "rejected"
+      | "accepted";
+    const prevStatus = application.status;
+    application.status = nextStatus;
+    if (prevStatus !== nextStatus) {
+      application.statusHistory.push({
+        status: nextStatus,
+        changedAt: new Date(),
+      });
+    }
     await application.save();
 
     const populatedApplication = await application.populate([
@@ -179,12 +210,12 @@ export const updateApplicationStatus = async (req: Request, res: Response) => {
         userId: applicantId,
         type: "application_status",
         title: "Application status updated",
-        body: `Your application for "${jobTitle}" is now ${status}.`,
+        body: `Your application for "${jobTitle}" is now ${APPLICATION_STATUS_LABEL[nextStatus]}.`,
         href: "/applications",
         metadata: {
           applicationId,
           jobId: jobIdStr,
-          status,
+          status: nextStatus,
         },
       });
     }
