@@ -3,29 +3,20 @@ import { Request, Response } from "express";
 import Application from "../models/applicationModel.js";
 import Job from "../models/jobModel.js";
 import { createNotification } from "../services/notificationService.js";
+import { fail, ok } from "../utils/http.js";
 
 export const applyForJob = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
     const jobId = req.params["jobId"];
 
-    if (user.role !== "jobseeker") {
-      return res
-        .status(403)
-        .json({ success: false, message: "Only job seekers can apply for jobs" });
-    }
-
     const job = await Job.findById(jobId);
     if (!job || job.status !== "active") {
-      return res
-        .status(404)
-        .json({ success: false, message: "Job not found or not active" });
+      return fail(res, 404, "NOT_FOUND", "Job not found or not active");
     }
 
     const file = req.file as Express.Multer.File | undefined;
@@ -33,9 +24,7 @@ export const applyForJob = async (req: Request, res: Response) => {
     const coverLetter = req.body.coverLetter;
 
     if (!resume) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Resume is required to apply" });
+      return fail(res, 400, "BAD_REQUEST", "Resume is required to apply");
     }
 
     const existingApplication = await Application.findOne({
@@ -44,9 +33,7 @@ export const applyForJob = async (req: Request, res: Response) => {
     });
 
     if (existingApplication) {
-      return res
-        .status(409)
-        .json({ success: false, message: "You already applied for this job" });
+      return fail(res, 409, "CONFLICT", "You already applied for this job");
     }
 
     const application = await Application.create({
@@ -81,34 +68,25 @@ export const applyForJob = async (req: Request, res: Response) => {
       },
     });
 
-    return res.status(201).json({
-      success: true,
-      message: "Application submitted successfully",
-      data: populatedApplication,
-    });
+    return ok(
+      res,
+      populatedApplication,
+      "Application submitted successfully",
+      201,
+    );
   } catch (error) {
     console.error("applyForJob error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to submit application" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to submit application");
   }
 };
 
 export const getMyApplications = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
-    if (user.role !== "jobseeker") {
-      return res.status(403).json({
-        success: false,
-        message: "Only job seekers can view their applications",
-      });
-    }
 
     const applications = await Application.find({ applicant: user.id })
       .populate({
@@ -118,25 +96,17 @@ export const getMyApplications = async (req: Request, res: Response) => {
       })
       .sort({ createdAt: -1 });
 
-    return res.json({
-      success: true,
-      message: "Applications fetched successfully",
-      data: applications,
-    });
+    return ok(res, applications, "Applications fetched successfully");
   } catch (error) {
     console.error("getMyApplications error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch applications" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to fetch applications");
   }
 };
 
 export const getJobApplications = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
@@ -144,14 +114,11 @@ export const getJobApplications = async (req: Request, res: Response) => {
     const job = await Job.findById(jobId);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Job not found" });
+      return fail(res, 404, "NOT_FOUND", "Job not found");
     }
 
     if (user.role !== "employer" || job.employer.toString() !== user.id) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized to view applications for this job",
-      });
+      return fail(res, 403, "FORBIDDEN", "Not authorized to view applications for this job");
     }
 
     const applications = await Application.find({ job: jobId })
@@ -159,25 +126,17 @@ export const getJobApplications = async (req: Request, res: Response) => {
       .populate("applicant", "name email role photo profile")
       .sort({ createdAt: -1 });
 
-    return res.json({
-      success: true,
-      message: "Job applications fetched successfully",
-      data: applications,
-    });
+    return ok(res, applications, "Job applications fetched successfully");
   } catch (error) {
     console.error("getJobApplications error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch job applications" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to fetch job applications");
   }
 };
 
 export const updateApplicationStatus = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
@@ -186,35 +145,18 @@ export const updateApplicationStatus = async (req: Request, res: Response) => {
       status: "pending" | "reviewed" | "shortlisted" | "rejected" | "accepted";
     };
 
-    const allowedStatuses = [
-      "pending",
-      "reviewed",
-      "shortlisted",
-      "rejected",
-      "accepted",
-    ];
-    if (!allowedStatuses.includes(status)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid application status" });
-    }
-
     const application = await Application.findById(applicationId).populate(
       "job",
       "employer"
     );
 
     if (!application) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Application not found" });
+      return fail(res, 404, "NOT_FOUND", "Application not found");
     }
 
     const jobEmployerId = ((application.job as any).employer || "").toString();
     if (user.role !== "employer" || jobEmployerId !== user.id) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized to update this status" });
+      return fail(res, 403, "FORBIDDEN", "Not authorized to update this status");
     }
 
     application.status = status;
@@ -247,15 +189,9 @@ export const updateApplicationStatus = async (req: Request, res: Response) => {
       });
     }
 
-    return res.json({
-      success: true,
-      message: "Application status updated successfully",
-      data: populatedApplication,
-    });
+    return ok(res, populatedApplication, "Application status updated successfully");
   } catch (error) {
     console.error("updateApplicationStatus error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to update application status" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to update application status");
   }
 };

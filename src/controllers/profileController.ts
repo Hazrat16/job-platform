@@ -12,44 +12,42 @@ const MAX_ITEMS = 25;
 
 function parseExperienceItems(raw: unknown): IExperienceItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw
-    .slice(0, MAX_ITEMS)
-    .map((row) => {
-      if (!row || typeof row !== "object") return null;
-      const o = row as Record<string, unknown>;
-      return {
-        title: typeof o.title === "string" ? o.title.trim() : "",
-        company: typeof o.company === "string" ? o.company.trim() : "",
-        location: typeof o.location === "string" ? o.location.trim() : "",
-        startDate: typeof o.startDate === "string" ? o.startDate.trim() : "",
-        endDate: typeof o.endDate === "string" ? o.endDate.trim() : "",
-        current: o.current === true,
-        description:
-          typeof o.description === "string" ? o.description.trim() : "",
-      };
-    })
-    .filter((x): x is IExperienceItem => x !== null);
+  const items: IExperienceItem[] = [];
+  for (const row of raw.slice(0, MAX_ITEMS)) {
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    items.push({
+      title: typeof o["title"] === "string" ? o["title"].trim() : "",
+      company: typeof o["company"] === "string" ? o["company"].trim() : "",
+      location: typeof o["location"] === "string" ? o["location"].trim() : "",
+      startDate: typeof o["startDate"] === "string" ? o["startDate"].trim() : "",
+      endDate: typeof o["endDate"] === "string" ? o["endDate"].trim() : "",
+      current: o["current"] === true,
+      description:
+        typeof o["description"] === "string" ? o["description"].trim() : "",
+    });
+  }
+  return items;
 }
 
 function parseEducationItems(raw: unknown): IEducationItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw
-    .slice(0, MAX_ITEMS)
-    .map((row) => {
-      if (!row || typeof row !== "object") return null;
-      const o = row as Record<string, unknown>;
-      return {
-        school: typeof o.school === "string" ? o.school.trim() : "",
-        degree: typeof o.degree === "string" ? o.degree.trim() : "",
-        field: typeof o.field === "string" ? o.field.trim() : "",
-        startYear: typeof o.startYear === "string" ? o.startYear.trim() : "",
-        endYear: typeof o.endYear === "string" ? o.endYear.trim() : "",
-        current: o.current === true,
-        description:
-          typeof o.description === "string" ? o.description.trim() : "",
-      };
-    })
-    .filter((x): x is IEducationItem => x !== null);
+  const items: IEducationItem[] = [];
+  for (const row of raw.slice(0, MAX_ITEMS)) {
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    items.push({
+      school: typeof o["school"] === "string" ? o["school"].trim() : "",
+      degree: typeof o["degree"] === "string" ? o["degree"].trim() : "",
+      field: typeof o["field"] === "string" ? o["field"].trim() : "",
+      startYear: typeof o["startYear"] === "string" ? o["startYear"].trim() : "",
+      endYear: typeof o["endYear"] === "string" ? o["endYear"].trim() : "",
+      current: o["current"] === true,
+      description:
+        typeof o["description"] === "string" ? o["description"].trim() : "",
+    });
+  }
+  return items;
 }
 
 function mergeProfile(
@@ -246,7 +244,9 @@ export const updateMyProfile = async (req: Request, res: Response) => {
 
     if (profile && typeof profile === "object") {
       const merged = mergeProfile(user.profile, profile);
-      merged.resumeUrl = user.profile?.resumeUrl ?? merged.resumeUrl;
+      if (user.profile?.resumeUrl) {
+        merged.resumeUrl = user.profile.resumeUrl;
+      }
       user.profile = merged;
     }
 

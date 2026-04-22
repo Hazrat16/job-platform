@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Request, Response } from "express";
 import Application from "../models/applicationModel.js";
 import Job from "../models/jobModel.js";
+import { fail, ok } from "../utils/http.js";
 
 const JOB_SORT_MAP: Record<string, Record<string, 1 | -1>> = {
   recent: { createdAt: -1 },
@@ -13,12 +14,13 @@ const JOB_SORT_MAP: Record<string, Record<string, 1 | -1>> = {
 export const getJobs = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.json({
-        success: true,
-        message: "Database unavailable, returning empty jobs list",
-        data: [],
-        meta: { page: 1, limit: 0, total: 0, totalPages: 0 },
-      });
+      return ok(
+        res,
+        [],
+        "Database unavailable, returning empty jobs list",
+        200,
+        { page: 1, limit: 0, total: 0, totalPages: 0 },
+      );
     }
 
     const {
@@ -67,39 +69,25 @@ export const getJobs = async (req: Request, res: Response) => {
       Job.countDocuments(filter),
     ]);
 
-    return res.json({
-      success: true,
-      message: "Jobs fetched successfully",
-      data: jobs,
-      meta: {
-        page: pageNumber,
-        limit: limitNumber,
-        total,
-        totalPages: Math.ceil(total / limitNumber),
-      },
+    return ok(res, jobs, "Jobs fetched successfully", 200, {
+      page: pageNumber,
+      limit: limitNumber,
+      total,
+      totalPages: Math.ceil(total / limitNumber),
     });
   } catch (error) {
     console.error("getJobs error:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch jobs" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to fetch jobs");
   }
 };
 
 export const getMyJobs = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: "Database is currently unavailable",
-      });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
-    if (user.role !== "employer") {
-      return res.status(403).json({
-        success: false,
-        message: "Only employers can list their posted jobs",
-      });
-    }
 
     const jobs = await Job.find({ employer: user.id })
       .populate("employer", "name email role isVerified photo")
@@ -124,29 +112,22 @@ export const getMyJobs = async (req: Request, res: Response) => {
       };
     });
 
-    return res.json({
-      success: true,
-      message: "Your jobs fetched successfully",
-      data,
-      meta: {
-        page: 1,
-        limit: jobs.length,
-        total: jobs.length,
-        totalPages: 1,
-      },
+    return ok(res, data, "Your jobs fetched successfully", 200, {
+      page: 1,
+      limit: jobs.length,
+      total: jobs.length,
+      totalPages: 1,
     });
   } catch (error) {
     console.error("getMyJobs error:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch your jobs" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to fetch your jobs");
   }
 };
 
 export const getJobById = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const job = await Job.findById(req.params["id"]).populate(
@@ -155,34 +136,23 @@ export const getJobById = async (req: Request, res: Response) => {
     );
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Job not found" });
+      return fail(res, 404, "NOT_FOUND", "Job not found");
     }
 
-    return res.json({
-      success: true,
-      message: "Job fetched successfully",
-      data: job,
-    });
+    return ok(res, job, "Job fetched successfully");
   } catch (error) {
     console.error("getJobById error:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch job" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to fetch job");
   }
 };
 
 export const createJob = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
-    if (user.role !== "employer") {
-      return res
-        .status(403)
-        .json({ success: false, message: "Only employers can create jobs" });
-    }
 
     const job = await Job.create({
       ...req.body,
@@ -194,36 +164,28 @@ export const createJob = async (req: Request, res: Response) => {
       "name email role isVerified photo"
     );
 
-    return res.status(201).json({
-      success: true,
-      message: "Job created successfully",
-      data: populatedJob,
-    });
+    return ok(res, populatedJob, "Job created successfully", 201);
   } catch (error) {
     console.error("createJob error:", error);
-    return res.status(500).json({ success: false, message: "Failed to create job" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to create job");
   }
 };
 
 export const updateJob = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
     const job = await Job.findById(req.params["id"]);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Job not found" });
+      return fail(res, 404, "NOT_FOUND", "Job not found");
     }
 
     if (user.role !== "employer" || job.employer.toString() !== user.id) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized to update this job" });
+      return fail(res, 403, "FORBIDDEN", "Not authorized to update this job");
     }
 
     Object.assign(job, req.body);
@@ -234,46 +196,35 @@ export const updateJob = async (req: Request, res: Response) => {
       "name email role isVerified photo"
     );
 
-    return res.json({
-      success: true,
-      message: "Job updated successfully",
-      data: populatedJob,
-    });
+    return ok(res, populatedJob, "Job updated successfully");
   } catch (error) {
     console.error("updateJob error:", error);
-    return res.status(500).json({ success: false, message: "Failed to update job" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to update job");
   }
 };
 
 export const deleteJob = async (req: Request, res: Response) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res
-        .status(503)
-        .json({ success: false, message: "Database is currently unavailable" });
+      return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
     const user = (req as any).user as { id?: string; role?: string };
     const job = await Job.findById(req.params["id"]);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Job not found" });
+      return fail(res, 404, "NOT_FOUND", "Job not found");
     }
 
     if (user.role !== "employer" || job.employer.toString() !== user.id) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized to delete this job" });
+      return fail(res, 403, "FORBIDDEN", "Not authorized to delete this job");
     }
 
     await Promise.all([Job.findByIdAndDelete(job.id), Application.deleteMany({ job: job.id })]);
 
-    return res.json({
-      success: true,
-      message: "Job deleted successfully",
-    });
+    return ok(res, { id: job.id }, "Job deleted successfully");
   } catch (error) {
     console.error("deleteJob error:", error);
-    return res.status(500).json({ success: false, message: "Failed to delete job" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to delete job");
   }
 };

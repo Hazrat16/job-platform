@@ -9,9 +9,12 @@ import resumeFitRoutes from "./routes/resumeFitRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
 import uploadRoute from "./routes/uploadRoute.js";
+import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
+import { requestContext } from "./middlewares/requestContext.js";
 console.log("✅ app.ts loaded");
 
 const app = express();
+app.use(requestContext);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -53,22 +56,7 @@ app.get("/api/test", (req, res) => {
     message: " Test route is working!...... 🚀",
   });
 });
-
-// Remove this line since startChatServer.ts handles server startup
-// startServer();
-app.use(
-  (
-    err: any,
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction
-  ) => {
-    console.error("Unhandled error:", err);
-    res.status(500).json({
-      success: false,
-      message: err?.message || "Something went wrong",
-    });
-  }
-);
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 export default app;

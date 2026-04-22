@@ -4,6 +4,7 @@ import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
 import { toPublicUser } from "../utils/userPublic.js";
+import { fail, ok } from "../utils/http.js";
 import {
   sendResetPasswordEmail,
   sendVerificationEmail,
@@ -16,13 +17,10 @@ export const registerUser = async (req: Request, res: Response) => {
     const { name, email, password, role } = req.body;
     const file = req.file;
 
-    if (role !== "jobseeker" && role !== "employer") {
-      return res.status(400).json({ error: "Invalid role. Use jobseeker or employer." });
-    }
-
     const existingUser = await User.findOne({ email });
-    if (existingUser)
-      return res.status(400).json({ error: "Email already exists" });
+    if (existingUser) {
+      return fail(res, 409, "CONFLICT", "Email already exists");
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const verificationToken = crypto.randomBytes(32).toString("hex");
@@ -49,17 +47,18 @@ export const registerUser = async (req: Request, res: Response) => {
 
     const emailSent = await sendVerificationEmail(email, verificationToken);
     if (!emailSent) {
-      return res
-        .status(500)
-        .json({ error: "Failed to send verification email" });
+      return fail(res, 500, "INTERNAL_ERROR", "Failed to send verification email");
     }
 
-    return res
-      .status(201)
-      .json({ message: "User registered. Check email to verify." });
+    return ok(
+      res,
+      { email },
+      "User registered. Check email to verify.",
+      201,
+    );
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "Registration failed" });
+    return fail(res, 500, "INTERNAL_ERROR", "Registration failed");
   }
 };
 
@@ -69,49 +68,49 @@ export const verifyEmail = async (req: Request, res: Response) => {
 
     console.log("Token received:", token);
 
-    if (!token || typeof token !== "string")
-      return res.status(400).json({ error: "Token is required" });
+    if (!token || typeof token !== "string") {
+      return fail(res, 400, "BAD_REQUEST", "Token is required");
+    }
 
     const user = await User.findOne({ verificationToken: token });
     console.log("User found:", user);
 
-    if (!user) return res.status(400).json({ error: "Invalid token" });
+    if (!user) return fail(res, 400, "BAD_REQUEST", "Invalid token");
 
     user.isVerified = true;
     user.verificationToken = undefined as any;
     await user.save();
 
-    return res.json({ message: "Email verified successfully!" });
+    return ok(res, { verified: true }, "Email verified successfully!");
   } catch (err) {
     console.error(" Email verification failed:", err);
-    return res.status(500).json({ error: "Email verification failed" });
+    return fail(res, 500, "INTERNAL_ERROR", "Email verification failed");
   }
 };
 
 export const loginUser = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
+    if (!JWT_SECRET) {
+      return fail(res, 500, "INTERNAL_ERROR", "Server misconfiguration");
+    }
 
     const user = await User.findOne({ email });
-    if (!user || !user.isVerified)
-      return res
-        .status(400)
-        .json({ error: "Invalid credentials or email not verified" });
+    if (!user || !user.isVerified) {
+      return fail(res, 400, "BAD_REQUEST", "Invalid credentials or email not verified");
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ error: "Invalid credentials" });
+    if (!isMatch) return fail(res, 400, "BAD_REQUEST", "Invalid credentials");
 
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, {
       expiresIn: "7d",
     });
 
-    return res.json({
-      token,
-      user: toPublicUser(user),
-    });
+    return ok(res, { token, user: toPublicUser(user) }, "Login successful");
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "Login failed" });
+    return fail(res, 500, "INTERNAL_ERROR", "Login failed");
   }
 };
 
@@ -119,7 +118,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!user) return fail(res, 404, "NOT_FOUND", "User not found");
 
     const token = crypto.randomBytes(32).toString("hex");
     user.resetPasswordToken = token;
@@ -130,13 +129,13 @@ export const forgotPassword = async (req: Request, res: Response) => {
     const emailSent = await sendResetPasswordEmail(user.email, resetLink);
 
     if (!emailSent) {
-      return res.status(500).json({ error: "Failed to send reset email." });
+      return fail(res, 500, "INTERNAL_ERROR", "Failed to send reset email");
     }
 
-    res.json({ message: "Password reset link sent to your email." });
+    return ok(res, { email }, "Password reset link sent to your email.");
   } catch (error) {
     console.error("Forgot password error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return fail(res, 500, "INTERNAL_ERROR", "Internal server error");
   }
 };
 
@@ -149,19 +148,18 @@ export const resetPassword = async (req: Request, res: Response) => {
       resetPasswordExpires: { $gt: Date.now() },
     });
 
-    if (!user)
-      return res.status(400).json({ error: "Invalid or expired token." });
+    if (!user) {
+      return fail(res, 400, "BAD_REQUEST", "Invalid or expired token");
+    }
 
     user.password = await bcrypt.hash(newPassword, 10);
     user.resetPasswordToken = undefined as any;
     user.resetPasswordExpires = undefined as any;
     await user.save();
 
-    res
-      .status(200)
-      .json({ success: true, message: "Password reset successful" });
+    return ok(res, { reset: true }, "Password reset successful");
   } catch (error) {
     console.error("Reset password error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return fail(res, 500, "INTERNAL_ERROR", "Internal server error");
   }
 };

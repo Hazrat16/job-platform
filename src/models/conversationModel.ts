@@ -67,28 +67,40 @@ conversationSchema.virtual("conversationType").get(function() {
 });
 
 // Method to add participant
-conversationSchema.methods.addParticipant = function(userId: mongoose.Types.ObjectId) {
-  if (!this.participants.includes(userId)) {
-    this.participants.push(userId);
-    this.unreadCount.set(userId.toString(), 0);
+conversationSchema.methods["addParticipant"] = function (
+  this: IConversation,
+  userId: mongoose.Types.ObjectId,
+) {
+  if (!this["participants"].some((id) => id.equals(userId))) {
+    this["participants"].push(userId);
+    this["unreadCount"].set(userId.toString(), 0);
   }
 };
 
 // Method to remove participant
-conversationSchema.methods.removeParticipant = function(userId: mongoose.Types.ObjectId) {
-  this.participants = this.participants.filter(id => !id.equals(userId));
-  this.unreadCount.delete(userId.toString());
+conversationSchema.methods["removeParticipant"] = function (
+  this: IConversation,
+  userId: mongoose.Types.ObjectId,
+) {
+  this["participants"] = this["participants"].filter((id) => !id.equals(userId));
+  this["unreadCount"].delete(userId.toString());
 };
 
 // Method to increment unread count
-conversationSchema.methods.incrementUnreadCount = function(userId: mongoose.Types.ObjectId) {
-  const currentCount = this.unreadCount.get(userId.toString()) || 0;
-  this.unreadCount.set(userId.toString(), currentCount + 1);
+conversationSchema.methods["incrementUnreadCount"] = function (
+  this: IConversation,
+  userId: mongoose.Types.ObjectId,
+) {
+  const currentCount = this["unreadCount"].get(userId.toString()) || 0;
+  this["unreadCount"].set(userId.toString(), currentCount + 1);
 };
 
 // Method to mark as read
-conversationSchema.methods.markAsRead = function(userId: mongoose.Types.ObjectId) {
-  this.unreadCount.set(userId.toString(), 0);
+conversationSchema.methods["markAsRead"] = function (
+  this: IConversation,
+  userId: mongoose.Types.ObjectId,
+) {
+  this["unreadCount"].set(userId.toString(), 0);
 };
 
 export default mongoose.model<IConversation>("Conversation", conversationSchema);

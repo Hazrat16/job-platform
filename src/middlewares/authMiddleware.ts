@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import { fail } from "../utils/http.js";
 
 export const authMiddleware = (
   req: Request,
@@ -9,7 +10,7 @@ export const authMiddleware = (
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Unauthorized" });
+    fail(res, 401, "UNAUTHORIZED", "Unauthorized");
     return;
   }
 
@@ -17,19 +18,24 @@ export const authMiddleware = (
   const secret = process.env["JWT_SECRET"];
   if (!secret) {
     console.error("authMiddleware: JWT_SECRET is not set");
-    res.status(500).json({
-      error: "Server misconfiguration",
-      message: "JWT_SECRET is not defined on the API server",
-    });
+    fail(
+      res,
+      500,
+      "INTERNAL_ERROR",
+      "Server misconfiguration: JWT_SECRET is not defined",
+    );
     return;
   }
 
   try {
-    const decoded = jwt.verify(token as string, secret);
+    const decoded = jwt.verify(token as string, secret) as {
+      id?: string;
+      role?: string;
+    };
     (req as any).user = decoded;
     next();
   } catch (err) {
-    res.status(401).json({ error: "Invalid token" });
+    fail(res, 401, "UNAUTHORIZED", "Invalid token");
     return;
   }
 };

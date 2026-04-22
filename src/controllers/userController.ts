@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import User, { IUser } from "../models/userModel.js";
 import { toPublicUser } from "../utils/userPublic.js";
+import { fail, ok } from "../utils/http.js";
 
 export const uploadProfilePhoto = async (req: Request, res: Response) => {
   try {
@@ -10,7 +11,7 @@ export const uploadProfilePhoto = async (req: Request, res: Response) => {
     const file = req.file;
 
     if (!file || !file.path) {
-      return res.status(400).json({ error: "No photo uploaded" });
+      return fail(res, 400, "BAD_REQUEST", "No photo uploaded");
     }
 
     const updatedUser = (await User.findByIdAndUpdate(
@@ -19,16 +20,16 @@ export const uploadProfilePhoto = async (req: Request, res: Response) => {
       { new: true }
     )) as IUser;
 
-    return res.json({
-      success: true,
-      message: "Profile photo updated successfully",
-      data: {
+    return ok(
+      res,
+      {
         photo: updatedUser.photo,
         user: toPublicUser(updatedUser),
       },
-    });
+      "Profile photo updated successfully",
+    );
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "Failed to upload photo" });
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to upload photo");
   }
 };

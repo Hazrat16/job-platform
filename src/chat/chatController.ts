@@ -150,8 +150,14 @@ export class ChatController {
 
       // Format conversations with unread counts
       const formattedConversations = conversations.map(conv => {
-        const otherParticipant = conv.participants.find(
-          (p: any) => p._id.toString() !== currentUserId
+        const participants = conv.participants as Array<{
+          _id: { toString(): string };
+          name?: string;
+          photo?: string;
+          email?: string;
+        }>;
+        const otherParticipant = participants.find(
+          (p) => p._id.toString() !== currentUserId
         );
         
         return {

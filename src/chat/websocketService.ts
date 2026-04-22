@@ -24,7 +24,7 @@ export class WebSocketService {
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3000",
+        origin: process.env["CLIENT_URL"] || "http://localhost:3000",
         methods: ["GET", "POST"],
         credentials: true,
       },
@@ -41,19 +41,24 @@ export class WebSocketService {
   private setupMiddleware(): void {
     this.io.use(async (socket: AuthenticatedSocket, next) => {
       try {
-        const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
+        const tokenFromAuth = socket.handshake.auth["token"];
+        const tokenFromHeader = socket.handshake.headers["authorization"];
+        const token = tokenFromAuth || tokenFromHeader;
         
         if (!token) {
           return next(new Error("Authentication token required"));
         }
 
         // Remove 'Bearer ' prefix if present
-        const cleanToken = token.replace("Bearer ", "");
+        const cleanToken = String(token).replace("Bearer ", "");
         
-        const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET || "fallback_secret") as any;
+        const decoded = jwt.verify(
+          cleanToken,
+          process.env["JWT_SECRET"] || "fallback_secret",
+        ) as { id?: string; role?: string };
         
-        socket.userId = decoded.id;
-        socket.userRole = decoded.role;
+        if (decoded.id) socket.userId = decoded.id;
+        if (decoded.role) socket.userRole = decoded.role;
         
         next();
       } catch (error) {
@@ -352,7 +357,7 @@ export class WebSocketService {
         if (!this.userRooms.has(socket.userId!)) {
           this.userRooms.set(socket.userId!, new Set());
         }
-        this.userRooms.get(socket.userId!)?.add(conversation._id.toString());
+        this.userRooms.get(socket.userId!)?.add(String(conversation._id));
       }
 
       // Send conversations to user

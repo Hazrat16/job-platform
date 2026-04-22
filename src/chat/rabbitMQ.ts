@@ -1,4 +1,4 @@
-import amqp, { Connection, Channel, Message } from "amqplib";
+import amqp, { Message } from "amqplib";
 
 interface QueueConfig {
   name: string;
@@ -13,8 +13,10 @@ interface ExchangeConfig {
 }
 
 class RabbitMQService {
-  private connection: Connection | null = null;
-  private channel: Channel | null = null;
+  private connection: Awaited<ReturnType<typeof amqp.connect>> | null = null;
+  private channel: Awaited<
+    ReturnType<Awaited<ReturnType<typeof amqp.connect>>["createChannel"]>
+  > | null = null;
   private isConnected = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -35,24 +37,25 @@ class RabbitMQService {
 
   async connect(): Promise<void> {
     try {
-      const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost";
+      const RABBITMQ_URL = process.env["RABBITMQ_URL"] || "amqp://localhost";
       
       console.log("🔄 Connecting to RabbitMQ...");
-      this.connection = await amqp.connect(RABBITMQ_URL);
+      const connection = await amqp.connect(RABBITMQ_URL);
+      this.connection = connection;
       
-      this.connection.on("error", (err) => {
+      connection.on("error", (err) => {
         console.error("❌ RabbitMQ connection error:", err);
         this.isConnected = false;
         this.handleReconnect();
       });
 
-      this.connection.on("close", () => {
+      connection.on("close", () => {
         console.warn("⚠️ RabbitMQ connection closed");
         this.isConnected = false;
         this.handleReconnect();
       });
 
-      this.channel = await this.connection.createChannel();
+      this.channel = await connection.createChannel();
       
       // Set up queues and exchanges
       await this.setupQueuesAndExchanges();
@@ -120,7 +123,7 @@ class RabbitMQService {
     }, this.reconnectDelay);
   }
 
-  async getChannel(): Promise<Channel> {
+  async getChannel(): Promise<NonNullable<RabbitMQService["channel"]>> {
     if (!this.channel || !this.isConnected) {
       await this.connect();
     }
