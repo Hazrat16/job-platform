@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   getMyProfile,
   listMySessions,
+  requestMyDataDeletion,
   revokeSession,
   updateMyProfile,
   uploadProfileResume,
@@ -18,5 +19,6 @@ router.patch("/", updateMyProfile);
 router.post("/resume", upload.single("resume"), uploadProfileResume);
 router.get("/sessions", listMySessions);
 router.delete("/sessions/:sessionId", revokeSession);
+router.post("/data-deletion-request", requestMyDataDeletion);
 
 export default router;

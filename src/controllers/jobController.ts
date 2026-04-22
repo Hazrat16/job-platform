@@ -39,7 +39,7 @@ export const getJobs = async (req: Request, res: Response) => {
     const limitNumber = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
     const skip = (pageNumber - 1) * limitNumber;
 
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     const normalizedStatus = status === "published" ? "active" : status;
     if (normalizedStatus) filter["status"] = normalizedStatus;
     if (type) filter["type"] = type;
@@ -89,7 +89,7 @@ export const getMyJobs = async (req: Request, res: Response) => {
 
     const user = (req as any).user as { id?: string; role?: string };
 
-    const jobs = await Job.find({ employer: user.id })
+    const jobs = await Job.find({ employer: user.id, deletedAt: { $exists: false } })
       .populate("employer", "name email role isVerified photo")
       .sort({ createdAt: -1 });
 
@@ -130,7 +130,7 @@ export const getJobById = async (req: Request, res: Response) => {
       return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
-    const job = await Job.findById(req.params["id"]).populate(
+    const job = await Job.findOne({ _id: req.params["id"], deletedAt: { $exists: false } }).populate(
       "employer",
       "name email role isVerified photo"
     );
@@ -178,7 +178,7 @@ export const updateJob = async (req: Request, res: Response) => {
     }
 
     const user = (req as any).user as { id?: string; role?: string };
-    const job = await Job.findById(req.params["id"]);
+    const job = await Job.findOne({ _id: req.params["id"], deletedAt: { $exists: false } });
 
     if (!job) {
       return fail(res, 404, "NOT_FOUND", "Job not found");
@@ -210,7 +210,7 @@ export const deleteJob = async (req: Request, res: Response) => {
     }
 
     const user = (req as any).user as { id?: string; role?: string };
-    const job = await Job.findById(req.params["id"]);
+    const job = await Job.findOne({ _id: req.params["id"], deletedAt: { $exists: false } });
 
     if (!job) {
       return fail(res, 404, "NOT_FOUND", "Job not found");
@@ -220,9 +220,13 @@ export const deleteJob = async (req: Request, res: Response) => {
       return fail(res, 403, "FORBIDDEN", "Not authorized to delete this job");
     }
 
-    await Promise.all([Job.findByIdAndDelete(job.id), Application.deleteMany({ job: job.id })]);
-
-    return ok(res, { id: job.id }, "Job deleted successfully");
+    const update: Record<string, unknown> = {
+      deletedAt: new Date(),
+      status: "closed",
+    };
+    if (user.id) update["deletedBy"] = new mongoose.Types.ObjectId(user.id);
+    await Job.updateOne({ _id: job.id }, { $set: update });
+    return ok(res, { id: job.id }, "Job archived successfully");
   } catch (error) {
     console.error("deleteJob error:", error);
     return fail(res, 500, "INTERNAL_ERROR", "Failed to delete job");
@@ -236,7 +240,7 @@ export const updateJobLifecycleStatus = async (req: Request, res: Response) => {
     }
 
     const user = (req as any).user as { id?: string; role?: string };
-    const job = await Job.findById(req.params["id"]);
+    const job = await Job.findOne({ _id: req.params["id"], deletedAt: { $exists: false } });
     if (!job) {
       return fail(res, 404, "NOT_FOUND", "Job not found");
     }

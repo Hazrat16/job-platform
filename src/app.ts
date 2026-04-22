@@ -9,6 +9,7 @@ import resumeFitRoutes from "./routes/resumeFitRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
 import uploadRoute from "./routes/uploadRoute.js";
+import adminRoutes from "./routes/adminRoutes.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 import { requestContext } from "./middlewares/requestContext.js";
 import {
@@ -75,6 +76,7 @@ app.use("/api/saved-jobs", savedJobRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/resume-fit", resumeFitRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/api/test", (req, res) => {
   res.json({

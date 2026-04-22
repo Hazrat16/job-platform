@@ -17,6 +17,8 @@ export interface IJob extends Document {
   benefits: string[];
   employer: Types.ObjectId;
   status: "active" | "closed" | "draft";
+  deletedAt?: Date;
+  deletedBy?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,6 +48,8 @@ const jobSchema = new Schema<IJob>(
       default: "active",
       required: true,
     },
+    deletedAt: { type: Date, index: true },
+    deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }
 );

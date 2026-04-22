@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { Request, Response } from "express";
 import Session from "../models/sessionModel.js";
+import DataDeletionRequest from "../models/dataDeletionRequestModel.js";
 import User, {
   IEducationItem,
   IExperienceItem,
@@ -401,5 +402,49 @@ export const revokeSession = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("revokeSession:", err);
     return res.status(500).json({ success: false, message: "Failed to revoke session" });
+  }
+};
+
+export const requestMyDataDeletion = async (req: Request, res: Response) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: "Database is currently unavailable",
+      });
+    }
+    const userId = (req as any).user?.id as string | undefined;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const reason =
+      typeof req.body?.reason === "string" ? String(req.body.reason).trim() : "";
+    const existingPending = await DataDeletionRequest.findOne({
+      userId,
+      status: "pending",
+    }).select("_id");
+    if (existingPending) {
+      return res.status(409).json({
+        success: false,
+        message: "A pending deletion request already exists",
+      });
+    }
+    const request = await DataDeletionRequest.create({
+      userId,
+      reason,
+      status: "pending",
+      requestedAt: new Date(),
+    });
+    return res.status(201).json({
+      success: true,
+      message: "Deletion request submitted",
+      data: request,
+    });
+  } catch (err) {
+    console.error("requestMyDataDeletion:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit deletion request",
+    });
   }
 };

@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { fail } from "../utils/http.js";
+import User from "../models/userModel.js";
 
 export const authMiddleware = (
   req: Request,
@@ -27,15 +28,33 @@ export const authMiddleware = (
     return;
   }
 
-  try {
+  void (async () => {
+    try {
     const decoded = jwt.verify(token as string, secret) as {
       id?: string;
       role?: string;
+      sid?: string;
     };
-    (req as any).user = decoded;
-    next();
-  } catch (err) {
-    fail(res, 401, "UNAUTHORIZED", "Invalid token");
-    return;
-  }
+      if (!decoded.id) {
+        fail(res, 401, "UNAUTHORIZED", "Invalid token");
+        return;
+      }
+      const user = await User.findById(decoded.id).select(
+        "role isSuspended suspendedAt deletedAt",
+      );
+      if (!user || user.deletedAt) {
+        fail(res, 401, "UNAUTHORIZED", "Account unavailable");
+        return;
+      }
+      if (user.isSuspended) {
+        fail(res, 403, "FORBIDDEN", "Account suspended");
+        return;
+      }
+      (req as any).user = { ...decoded, role: user.role };
+      next();
+    } catch (err) {
+      fail(res, 401, "UNAUTHORIZED", "Invalid token");
+      return;
+    }
+  })();
 };
