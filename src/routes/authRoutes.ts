@@ -3,6 +3,9 @@ import type { Request, Response } from "express";
 import {
   forgotPassword,
   loginUser,
+  logoutAllSessions,
+  logoutUser,
+  refreshSession,
   registerUser,
   resetPassword,
   verifyEmail,
@@ -55,6 +58,13 @@ router.post(
   validateResetPasswordInput,
   asyncHandler(resetPassword),
 );
+router.post(
+  "/refresh",
+  rateLimit({ key: "auth-refresh", windowMs: 60_000, max: 30 }),
+  asyncHandler(refreshSession),
+);
+router.post("/logout", authMiddleware, asyncHandler(logoutUser));
+router.post("/logout-all", authMiddleware, asyncHandler(logoutAllSessions));
 router.post(
   "/upload-photo",
   authMiddleware,

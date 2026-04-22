@@ -1,16 +1,25 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { Request, Response } from "express";
-import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
+import Session from "../models/sessionModel.js";
 import User from "../models/userModel.js";
+import {
+  clearRefreshCookie,
+  generateRefreshToken,
+  getRequestClientInfo,
+  hashToken,
+  readRefreshToken,
+  refreshExpiryDate,
+  setRefreshCookie,
+  signAccessToken,
+} from "../utils/authSession.js";
 import { toPublicUser } from "../utils/userPublic.js";
 import { fail, ok } from "../utils/http.js";
 import {
   sendResetPasswordEmail,
   sendVerificationEmail,
 } from "../utils/email.js";
-
-const JWT_SECRET = process.env["JWT_SECRET"] as string;
 
 export const registerUser = async (req: Request, res: Response) => {
   try {
@@ -91,9 +100,6 @@ export const verifyEmail = async (req: Request, res: Response) => {
 export const loginUser = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
-    if (!JWT_SECRET) {
-      return fail(res, 500, "INTERNAL_ERROR", "Server misconfiguration");
-    }
 
     const user = await User.findOne({ email });
     if (!user || !user.isVerified) {
@@ -103,14 +109,135 @@ export const loginUser = async (req: Request, res: Response) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return fail(res, 400, "BAD_REQUEST", "Invalid credentials");
 
-    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, {
-      expiresIn: "7d",
+    const refreshToken = generateRefreshToken();
+    const refreshTokenHash = hashToken(refreshToken);
+    const expiresAt = refreshExpiryDate();
+    const { userAgent, ipAddress } = getRequestClientInfo(req);
+
+    const session = await Session.create({
+      userId: user._id,
+      refreshTokenHash,
+      userAgent,
+      ipAddress,
+      lastUsedAt: new Date(),
+      expiresAt,
     });
 
-    return ok(res, { token, user: toPublicUser(user) }, "Login successful");
+    const token = signAccessToken({
+      id: String(user._id),
+      role: user.role,
+      sid: String(session._id),
+    });
+    setRefreshCookie(res, refreshToken);
+
+    return ok(
+      res,
+      {
+        token,
+        user: toPublicUser(user),
+      },
+      "Login successful",
+    );
   } catch (err) {
     console.error(err);
     return fail(res, 500, "INTERNAL_ERROR", "Login failed");
+  }
+};
+
+export const refreshSession = async (req: Request, res: Response) => {
+  try {
+    const refreshToken = readRefreshToken(req);
+    if (!refreshToken) {
+      clearRefreshCookie(res);
+      return fail(res, 401, "UNAUTHORIZED", "Refresh token is missing");
+    }
+
+    const refreshTokenHash = hashToken(refreshToken);
+    const session = await Session.findOne({
+      refreshTokenHash,
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    });
+    if (!session) {
+      clearRefreshCookie(res);
+      return fail(res, 401, "UNAUTHORIZED", "Refresh token is invalid or expired");
+    }
+
+    const user = await User.findById(session.userId);
+    if (!user) {
+      session.revokedAt = new Date();
+      await session.save();
+      clearRefreshCookie(res);
+      return fail(res, 401, "UNAUTHORIZED", "User not found for this session");
+    }
+
+    const nextRefreshToken = generateRefreshToken();
+    session.refreshTokenHash = hashToken(nextRefreshToken);
+    session.lastUsedAt = new Date();
+    session.expiresAt = refreshExpiryDate();
+    await session.save();
+
+    const token = signAccessToken({
+      id: String(user._id),
+      role: user.role,
+      sid: String(session._id),
+    });
+    setRefreshCookie(res, nextRefreshToken);
+
+    return ok(res, { token, user: toPublicUser(user) }, "Session refreshed");
+  } catch (error) {
+    console.error("refreshSession error:", error);
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to refresh session");
+  }
+};
+
+export const logoutUser = async (req: Request, res: Response) => {
+  try {
+    const sid = (req as any).user?.sid as string | undefined;
+    const refreshToken = readRefreshToken(req);
+
+    if (sid && mongoose.Types.ObjectId.isValid(sid)) {
+      await Session.updateOne(
+        { _id: sid, revokedAt: { $exists: false } },
+        { $set: { revokedAt: new Date() } },
+      );
+    } else if (refreshToken) {
+      await Session.updateOne(
+        {
+          refreshTokenHash: hashToken(refreshToken),
+          revokedAt: { $exists: false },
+        },
+        { $set: { revokedAt: new Date() } },
+      );
+    }
+
+    clearRefreshCookie(res);
+    return ok(res, { loggedOut: true }, "Logged out successfully");
+  } catch (error) {
+    console.error("logoutUser error:", error);
+    clearRefreshCookie(res);
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to logout");
+  }
+};
+
+export const logoutAllSessions = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id as string | undefined;
+    if (!userId) {
+      clearRefreshCookie(res);
+      return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
+    }
+
+    await Session.updateMany(
+      { userId, revokedAt: { $exists: false } },
+      { $set: { revokedAt: new Date() } },
+    );
+    clearRefreshCookie(res);
+    return ok(res, { loggedOutAll: true }, "Logged out from all devices");
+  } catch (error) {
+    console.error("logoutAllSessions error:", error);
+    clearRefreshCookie(res);
+    return fail(res, 500, "INTERNAL_ERROR", "Failed to logout from all devices");
   }
 };
 
@@ -156,6 +283,11 @@ export const resetPassword = async (req: Request, res: Response) => {
     user.resetPasswordToken = undefined as any;
     user.resetPasswordExpires = undefined as any;
     await user.save();
+    await Session.updateMany(
+      { userId: user._id, revokedAt: { $exists: false } },
+      { $set: { revokedAt: new Date() } },
+    );
+    clearRefreshCookie(res);
 
     return ok(res, { reset: true }, "Password reset successful");
   } catch (error) {

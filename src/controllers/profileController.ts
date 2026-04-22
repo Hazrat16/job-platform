@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { Request, Response } from "express";
+import Session from "../models/sessionModel.js";
 import User, {
   IEducationItem,
   IExperienceItem,
@@ -306,5 +307,99 @@ export const uploadProfileResume = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("uploadProfileResume:", err);
     return res.status(500).json({ success: false, message: "Failed to upload resume" });
+  }
+};
+
+export const listMySessions = async (req: Request, res: Response) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: "Database is currently unavailable",
+      });
+    }
+
+    const userId = (req as any).user?.id as string | undefined;
+    const currentSid = (req as any).user?.sid as string | undefined;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const sessions = await Session.find({
+      userId,
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    })
+      .sort({ lastUsedAt: -1, createdAt: -1 })
+      .limit(20);
+
+    const data = sessions.map((s) => ({
+      id: String(s._id),
+      isCurrent: currentSid ? String(s._id) === currentSid : false,
+      userAgent: s.userAgent || "",
+      ipAddress: s.ipAddress || "",
+      lastUsedAt: s.lastUsedAt ? s.lastUsedAt.toISOString() : null,
+      createdAt: s.createdAt ? s.createdAt.toISOString() : null,
+      expiresAt: s.expiresAt.toISOString(),
+    }));
+
+    return res.json({
+      success: true,
+      message: "Sessions loaded",
+      data,
+    });
+  } catch (err) {
+    console.error("listMySessions:", err);
+    return res.status(500).json({ success: false, message: "Failed to load sessions" });
+  }
+};
+
+export const revokeSession = async (req: Request, res: Response) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: "Database is currently unavailable",
+      });
+    }
+
+    const userId = (req as any).user?.id as string | undefined;
+    const currentSid = (req as any).user?.sid as string | undefined;
+    const sessionId = req.params["sessionId"];
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    if (!sessionId || !mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ success: false, message: "Invalid session id" });
+    }
+    if (currentSid && currentSid === sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: "Use logout for current session",
+      });
+    }
+
+    const result = await Session.updateOne(
+      {
+        _id: sessionId,
+        userId,
+        revokedAt: { $exists: false },
+      },
+      {
+        $set: { revokedAt: new Date() },
+      },
+    );
+    if (!result.matchedCount) {
+      return res.status(404).json({ success: false, message: "Session not found" });
+    }
+
+    return res.json({
+      success: true,
+      message: "Session revoked",
+      data: { sessionId },
+    });
+  } catch (err) {
+    console.error("revokeSession:", err);
+    return res.status(500).json({ success: false, message: "Failed to revoke session" });
   }
 };

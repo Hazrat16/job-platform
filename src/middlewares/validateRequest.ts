@@ -71,16 +71,21 @@ export function validateResetPasswordInput(
   res: Response,
   next: NextFunction,
 ) {
-  const { token, newPassword } = req.body as Record<string, unknown>;
+  const { token, newPassword, password } = req.body as Record<string, unknown>;
+  const candidatePassword =
+    typeof newPassword === "string" ? newPassword : password;
   const issues = toIssues(req, [
     typeof token === "string" && token.trim().length > 0
       ? null
       : { field: "token", message: "Reset token is required" },
-    typeof newPassword === "string" && newPassword.length >= 6
+    typeof candidatePassword === "string" && candidatePassword.length >= 6
       ? null
-      : { field: "newPassword", message: "newPassword must be at least 6 characters" },
+      : { field: "password", message: "Password must be at least 6 characters" },
   ]);
   if (rejectIfIssues(res, issues)) return;
+  if (typeof newPassword !== "string" && typeof password === "string") {
+    req.body["newPassword"] = password;
+  }
   next();
 }
 
