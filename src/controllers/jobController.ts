@@ -4,6 +4,22 @@ import Application from "../models/applicationModel.js";
 import Job from "../models/jobModel.js";
 import { fail, ok } from "../utils/http.js";
 
+function normalizeJobSkills(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of input) {
+    const t = String(item).trim().slice(0, 60);
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
 const JOB_SORT_MAP: Record<string, Record<string, 1 | -1>> = {
   recent: { createdAt: -1 },
   oldest: { createdAt: 1 },
@@ -153,9 +169,12 @@ export const createJob = async (req: Request, res: Response) => {
     }
 
     const user = (req as any).user as { id?: string; role?: string };
+    const body = req.body as Record<string, unknown>;
+    const skills = normalizeJobSkills(body["skills"]);
 
     const job = await Job.create({
-      ...req.body,
+      ...body,
+      skills,
       employer: user.id,
     });
 
@@ -188,7 +207,12 @@ export const updateJob = async (req: Request, res: Response) => {
       return fail(res, 403, "FORBIDDEN", "Not authorized to update this job");
     }
 
-    Object.assign(job, req.body);
+    const body = req.body as Record<string, unknown>;
+    if (body["skills"] !== undefined) {
+      job.set("skills", normalizeJobSkills(body["skills"]));
+      delete body["skills"];
+    }
+    Object.assign(job, body);
     await job.save();
 
     const populatedJob = await job.populate(

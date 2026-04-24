@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
-import Job from "../models/jobModel.js";
+import Job, { coerceJobArrays } from "../models/jobModel.js";
 import { analyzeResumeAgainstJob, rewriteResumeForJob } from "../services/resumeFitAIService.js";
 import { extractResumeTextFromUpload } from "../utils/resumeTextExtract.js";
 
@@ -79,11 +79,14 @@ export const analyzeResumeFit = async (req: Request, res: Response) => {
       if (!mongoose.Types.ObjectId.isValid(jobId)) {
         return res.status(400).json({ success: false, message: "Invalid job id" });
       }
-      const job = await Job.findById(jobId).lean();
-      if (!job) {
+      const jobRaw = await Job.findById(jobId).lean();
+      if (!jobRaw) {
         return res.status(404).json({ success: false, message: "Job not found" });
       }
-      const base = buildJobContext(job);
+      const job = coerceJobArrays(jobRaw as Record<string, unknown>);
+      const base = buildJobContext(
+        job as Parameters<typeof buildJobContext>[0],
+      );
       jobContext = jobDescriptionExtra
         ? `${base}\n\nAdditional notes from applicant:\n${jobDescriptionExtra}`
         : base;
@@ -154,11 +157,14 @@ export const rewriteResumeFit = async (req: Request, res: Response) => {
       if (!mongoose.Types.ObjectId.isValid(jid)) {
         return res.status(400).json({ success: false, message: "Invalid job id" });
       }
-      const job = await Job.findById(jid).lean();
-      if (!job) {
+      const jobRaw = await Job.findById(jid).lean();
+      if (!jobRaw) {
         return res.status(404).json({ success: false, message: "Job not found" });
       }
-      const base = buildJobContext(job);
+      const job = coerceJobArrays(jobRaw as Record<string, unknown>);
+      const base = buildJobContext(
+        job as Parameters<typeof buildJobContext>[0],
+      );
       jobContext = jobDescriptionExtra ? `${base}\n\n${jobDescriptionExtra}` : base;
     }
 

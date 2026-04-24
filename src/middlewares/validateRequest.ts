@@ -116,6 +116,23 @@ export function validateCreateJobInput(req: Request, res: Response, next: NextFu
     typeof body["description"] === "string" && body["description"].trim().length >= 20
       ? null
       : { field: "description", message: "Description must be at least 20 characters" },
+    (() => {
+      const skills = body["skills"];
+      if (!Array.isArray(skills)) {
+        return { field: "skills", message: "skills must be an array of strings" };
+      }
+      if (skills.length < 1 || skills.length > 30) {
+        return { field: "skills", message: "Add between 1 and 30 skills" };
+      }
+      const normalized = skills.map((s) => String(s).trim()).filter(Boolean);
+      if (normalized.length !== skills.length) {
+        return { field: "skills", message: "Each skill must be a non-empty string" };
+      }
+      if (normalized.some((s) => s.length > 60)) {
+        return { field: "skills", message: "Each skill must be at most 60 characters" };
+      }
+      return null;
+    })(),
   ]);
   if (rejectIfIssues(res, issues)) return;
   next();
@@ -126,6 +143,26 @@ export function validateUpdateJobInput(req: Request, res: Response, next: NextFu
   if (Object.keys(body).length === 0) {
     fail(res, 400, "BAD_REQUEST", "At least one field must be provided");
     return;
+  }
+  if (body["skills"] !== undefined) {
+    const skills = body["skills"];
+    if (!Array.isArray(skills)) {
+      fail(res, 400, "BAD_REQUEST", "Validation failed", {
+        issues: [{ field: "skills", message: "skills must be an array of strings" }],
+      });
+      return;
+    }
+    const issues = toIssues(req, [
+      skills.length >= 1 && skills.length <= 30
+        ? null
+        : { field: "skills", message: "skills must have between 1 and 30 entries" },
+      skills.every(
+        (s) => typeof s === "string" && String(s).trim().length > 0 && String(s).trim().length <= 60,
+      )
+        ? null
+        : { field: "skills", message: "Each skill must be a non-empty string (max 60 characters)" },
+    ]);
+    if (rejectIfIssues(res, issues)) return;
   }
   next();
 }
