@@ -7,7 +7,7 @@ type RemoteJob = {
   company: string;
   location: string;
   url: string;
-  source: "remotive" | "arbeitnow";
+  source: "remotive" | "arbeitnow" | "remoteok";
   tags: string[];
   publishedAt?: string;
   salary?: string;
@@ -73,6 +73,54 @@ async function fetchArbeitnow(): Promise<RemoteJob[]> {
     }));
 }
 
+async function fetchRemoteOk(): Promise<RemoteJob[]> {
+  const res = await fetch("https://remoteok.com/api", {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "JobPlatformBot/1.0 (+remote-job-ingestion)",
+    },
+  });
+  if (!res.ok) throw new Error(`RemoteOK API failed (${res.status})`);
+  const json = (await res.json()) as Array<
+    | { legal?: string }
+    | {
+        id?: number | string;
+        slug?: string;
+        position?: string;
+        company?: string;
+        location?: string;
+        url?: string;
+        tags?: string[];
+        date?: string;
+        salary_min?: number;
+        salary_max?: number;
+      }
+  >;
+  return (json ?? [])
+    .filter((row): row is Exclude<(typeof json)[number], { legal?: string }> => {
+      return Boolean(row && typeof row === "object" && !("legal" in row));
+    })
+    .map((j) => {
+      const idPart = j.id ?? j.slug ?? `${j.company}-${j.position}`;
+      const salaryText =
+        typeof j.salary_min === "number" || typeof j.salary_max === "number"
+          ? `${j.salary_min ?? "?"} - ${j.salary_max ?? "?"} USD`
+          : undefined;
+      return {
+        id: `remoteok-${String(idPart)}`,
+        title: j.position ?? "Untitled role",
+        company: j.company ?? "Unknown company",
+        location: j.location || "Remote",
+        url: j.url || "https://remoteok.com/",
+        source: "remoteok" as const,
+        tags: Array.isArray(j.tags) ? j.tags : [],
+        ...(j.date ? { publishedAt: j.date } : {}),
+        ...(salaryText ? { salary: salaryText } : {}),
+      };
+    })
+    .filter((job) => Boolean(job.title && job.company && job.url));
+}
+
 function dedupeJobs(items: RemoteJob[]): RemoteJob[] {
   const seen = new Set<string>();
   const out: RemoteJob[] = [];
@@ -90,10 +138,15 @@ async function getAggregatedRemoteJobs(): Promise<RemoteJob[]> {
   if (remoteJobsCache && remoteJobsCache.expiresAt > now) {
     return remoteJobsCache.data;
   }
-  const [r1, r2] = await Promise.allSettled([fetchRemotive(), fetchArbeitnow()]);
+  const [r1, r2, r3] = await Promise.allSettled([
+    fetchRemotive(),
+    fetchArbeitnow(),
+    fetchRemoteOk(),
+  ]);
   const jobs = dedupeJobs([
     ...(r1.status === "fulfilled" ? r1.value : []),
     ...(r2.status === "fulfilled" ? r2.value : []),
+    ...(r3.status === "fulfilled" ? r3.value : []),
   ]);
   remoteJobsCache = { expiresAt: now + REMOTE_JOBS_TTL_MS, data: jobs };
   return jobs;
@@ -103,7 +156,8 @@ export async function listRemoteJobs(req: Request, res: Response) {
   try {
     const query = typeof req.query["search"] === "string" ? req.query["search"].trim().toLowerCase() : "";
     const source = typeof req.query["source"] === "string" ? req.query["source"].trim() : "";
-    const limit = Math.max(1, Math.min(200, Number(req.query["limit"] ?? 100) || 100));
+    const limit = Math.max(1, Math.min(100, Number(req.query["limit"] ?? 20) || 20));
+    const page = Math.max(1, Number(req.query["page"] ?? 1) || 1);
     let jobs = await getAggregatedRemoteJobs();
     if (source) {
       jobs = jobs.filter((j) => j.source === source);
@@ -113,10 +167,17 @@ export async function listRemoteJobs(req: Request, res: Response) {
         `${j.title} ${j.company} ${j.location} ${j.tags.join(" ")}`.toLowerCase().includes(query),
       );
     }
-    jobs = jobs.slice(0, limit);
-    return ok(res, jobs, "Remote jobs fetched", 200, {
-      total: jobs.length,
-      sources: ["remotive", "arbeitnow"],
+    const total = jobs.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const normalizedPage = Math.min(page, totalPages);
+    const start = (normalizedPage - 1) * limit;
+    const pageData = jobs.slice(start, start + limit);
+    return ok(res, pageData, "Remote jobs fetched", 200, {
+      total,
+      page: normalizedPage,
+      limit,
+      totalPages,
+      sources: ["remotive", "arbeitnow", "remoteok"],
       cached: true,
     });
   } catch (error) {
