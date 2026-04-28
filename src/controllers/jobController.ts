@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Request, Response } from "express";
 import Application from "../models/applicationModel.js";
 import Job from "../models/jobModel.js";
+import { cacheDeleteByPrefix, cacheGet, cacheSet } from "../utils/apiCache.js";
 import { fail, ok } from "../utils/http.js";
 
 function normalizeJobSkills(input: unknown): string[] {
@@ -26,6 +27,9 @@ const JOB_SORT_MAP: Record<string, Record<string, 1 | -1>> = {
   salary_desc: { "salary.max": -1, createdAt: -1 },
   salary_asc: { "salary.min": 1, createdAt: -1 },
 };
+
+const JOB_LIST_CACHE_TTL_MS = 15_000;
+const JOB_DETAILS_CACHE_TTL_MS = 30_000;
 
 export const getJobs = async (req: Request, res: Response) => {
   try {
@@ -75,22 +79,30 @@ export const getJobs = async (req: Request, res: Response) => {
     }
 
     const sortConfig = JOB_SORT_MAP[sort] || JOB_SORT_MAP["recent"];
+    const cacheKey = `jobs:list:${req.originalUrl}`;
+    const cached = cacheGet<{ jobs: unknown[]; meta: Record<string, unknown> }>(cacheKey);
+    if (cached) {
+      return ok(res, cached.jobs, "Jobs fetched successfully", 200, cached.meta);
+    }
 
     const [jobs, total] = await Promise.all([
       Job.find(filter)
-        .populate("employer", "name email role isVerified photo")
+        .populate("employer", "name role isVerified photo")
         .sort(sortConfig)
         .skip(skip)
-        .limit(limitNumber),
+        .limit(limitNumber)
+        .lean(),
       Job.countDocuments(filter),
     ]);
 
-    return ok(res, jobs, "Jobs fetched successfully", 200, {
+    const meta = {
       page: pageNumber,
       limit: limitNumber,
       total,
       totalPages: Math.ceil(total / limitNumber),
-    });
+    };
+    cacheSet(cacheKey, { jobs, meta }, JOB_LIST_CACHE_TTL_MS);
+    return ok(res, jobs, "Jobs fetched successfully", 200, meta);
   } catch (error) {
     console.error("getJobs error:", error);
     return fail(res, 500, "INTERNAL_ERROR", "Failed to fetch jobs");
@@ -106,8 +118,9 @@ export const getMyJobs = async (req: Request, res: Response) => {
     const user = (req as any).user as { id?: string; role?: string };
 
     const jobs = await Job.find({ employer: user.id, deletedAt: { $exists: false } })
-      .populate("employer", "name email role isVerified photo")
-      .sort({ createdAt: -1 });
+      .populate("employer", "name role isVerified photo")
+      .sort({ createdAt: -1 })
+      .lean();
 
     const jobIds = jobs.map((j) => j._id);
     const countRows =
@@ -120,13 +133,10 @@ export const getMyJobs = async (req: Request, res: Response) => {
     const countMap = new Map(
       countRows.map((r) => [String(r._id), r.applicationCount]),
     );
-    const data = jobs.map((job) => {
-      const plain = job.toObject();
-      return {
-        ...plain,
-        applicationCount: countMap.get(String(job._id)) ?? 0,
-      };
-    });
+    const data = jobs.map((job) => ({
+      ...job,
+      applicationCount: countMap.get(String(job._id)) ?? 0,
+    }));
 
     return ok(res, data, "Your jobs fetched successfully", 200, {
       page: 1,
@@ -146,15 +156,21 @@ export const getJobById = async (req: Request, res: Response) => {
       return fail(res, 503, "SERVICE_UNAVAILABLE", "Database is currently unavailable");
     }
 
-    const job = await Job.findOne({ _id: req.params["id"], deletedAt: { $exists: false } }).populate(
-      "employer",
-      "name email role isVerified photo"
-    );
+    const cacheKey = `jobs:details:${req.params["id"]}`;
+    const cached = cacheGet<unknown>(cacheKey);
+    if (cached) {
+      return ok(res, cached, "Job fetched successfully");
+    }
+
+    const job = await Job.findOne({ _id: req.params["id"], deletedAt: { $exists: false } })
+      .populate("employer", "name role isVerified photo")
+      .lean();
 
     if (!job) {
       return fail(res, 404, "NOT_FOUND", "Job not found");
     }
 
+    cacheSet(cacheKey, job, JOB_DETAILS_CACHE_TTL_MS);
     return ok(res, job, "Job fetched successfully");
   } catch (error) {
     console.error("getJobById error:", error);
@@ -178,12 +194,9 @@ export const createJob = async (req: Request, res: Response) => {
       employer: user.id,
     });
 
-    const populatedJob = await job.populate(
-      "employer",
-      "name email role isVerified photo"
-    );
-
-    return ok(res, populatedJob, "Job created successfully", 201);
+    const createdJob = job.toObject();
+    cacheDeleteByPrefix("jobs:");
+    return ok(res, createdJob, "Job created successfully", 201);
   } catch (error) {
     console.error("createJob error:", error);
     return fail(res, 500, "INTERNAL_ERROR", "Failed to create job");
@@ -215,12 +228,9 @@ export const updateJob = async (req: Request, res: Response) => {
     Object.assign(job, body);
     await job.save();
 
-    const populatedJob = await job.populate(
-      "employer",
-      "name email role isVerified photo"
-    );
-
-    return ok(res, populatedJob, "Job updated successfully");
+    const updatedJob = job.toObject();
+    cacheDeleteByPrefix("jobs:");
+    return ok(res, updatedJob, "Job updated successfully");
   } catch (error) {
     console.error("updateJob error:", error);
     return fail(res, 500, "INTERNAL_ERROR", "Failed to update job");
@@ -250,6 +260,7 @@ export const deleteJob = async (req: Request, res: Response) => {
     };
     if (user.id) update["deletedBy"] = new mongoose.Types.ObjectId(user.id);
     await Job.updateOne({ _id: job.id }, { $set: update });
+    cacheDeleteByPrefix("jobs:");
     return ok(res, { id: job.id }, "Job archived successfully");
   } catch (error) {
     console.error("deleteJob error:", error);
@@ -285,8 +296,9 @@ export const updateJobLifecycleStatus = async (req: Request, res: Response) => {
     await job.save();
     const populatedJob = await job.populate(
       "employer",
-      "name email role isVerified photo",
+      "name role isVerified photo",
     );
+    cacheDeleteByPrefix("jobs:");
 
     const statusLabel =
       status === "active" ? "published" : status === "closed" ? "closed" : "saved as draft";

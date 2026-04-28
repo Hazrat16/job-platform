@@ -112,7 +112,8 @@ export const getMyApplications = async (req: Request, res: Response) => {
         select: "title company location type salary status employer createdAt",
         populate: { path: "employer", select: "name email isVerified" },
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     return ok(res, applications, "Applications fetched successfully");
   } catch (error) {
@@ -142,7 +143,8 @@ export const getJobApplications = async (req: Request, res: Response) => {
     const applications = await Application.find({ job: jobId })
       .populate("job", "title company employer status")
       .populate("applicant", "name email role photo profile")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     return ok(res, applications, "Job applications fetched successfully");
   } catch (error) {

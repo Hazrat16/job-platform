@@ -10,6 +10,7 @@ import chatRoutes from "./routes/chatRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
 import uploadRoute from "./routes/uploadRoute.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import externalJobRoutes from "./routes/externalJobRoutes.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 import { requestContext } from "./middlewares/requestContext.js";
 import {
@@ -31,6 +32,15 @@ setInterval(() => {
 
 app.use((req, res, next) => {
   const startedAt = Date.now();
+  const originalEnd = res.end.bind(res);
+  res.end = ((...args: Parameters<typeof res.end>) => {
+    const latencyMs = Date.now() - startedAt;
+    if (!res.headersSent) {
+      res.setHeader("Server-Timing", `app;dur=${latencyMs}`);
+      res.setHeader("X-Response-Time", `${latencyMs}ms`);
+    }
+    return originalEnd(...args);
+  }) as typeof res.end;
   res.on("finish", () => {
     const latencyMs = Date.now() - startedAt;
     trackHttp(res.statusCode, latencyMs);
@@ -77,6 +87,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/resume-fit", resumeFitRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/external-jobs", externalJobRoutes);
 
 app.get("/api/test", (req, res) => {
   res.json({
