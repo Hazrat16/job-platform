@@ -7,7 +7,7 @@ type RemoteJob = {
   company: string;
   location: string;
   url: string;
-  source: "remotive" | "arbeitnow" | "remoteok";
+  source: "remotive" | "arbeitnow" | "remoteok" | "themuse";
   tags: string[];
   publishedAt?: string;
   salary?: string;
@@ -121,6 +121,40 @@ async function fetchRemoteOk(): Promise<RemoteJob[]> {
     .filter((job) => Boolean(job.title && job.company && job.url));
 }
 
+async function fetchTheMuse(): Promise<RemoteJob[]> {
+  const res = await fetch("https://www.themuse.com/api/public/jobs?page=1");
+  if (!res.ok) throw new Error(`TheMuse API failed (${res.status})`);
+  const json = (await res.json()) as {
+    results?: Array<{
+      id: number;
+      name: string;
+      locations?: Array<{ name?: string }>;
+      company?: { name?: string };
+      refs?: { landing_page?: string };
+      publication_date?: string;
+      levels?: Array<{ name?: string }>;
+      categories?: Array<{ name?: string }>;
+    }>;
+  };
+  return (json.results ?? []).map((j) => ({
+    id: `themuse-${j.id}`,
+    title: j.name,
+    company: j.company?.name || "Unknown company",
+    location:
+      (j.locations ?? [])
+        .map((l) => l.name)
+        .filter((name): name is string => Boolean(name))
+        .join(" | ") || "Remote / Flexible",
+    url: j.refs?.landing_page || "https://www.themuse.com/jobs",
+    source: "themuse",
+    tags: [
+      ...(j.levels ?? []).map((x) => x.name).filter((x): x is string => Boolean(x)),
+      ...(j.categories ?? []).map((x) => x.name).filter((x): x is string => Boolean(x)),
+    ],
+    ...(j.publication_date ? { publishedAt: j.publication_date } : {}),
+  }));
+}
+
 function dedupeJobs(items: RemoteJob[]): RemoteJob[] {
   const seen = new Set<string>();
   const out: RemoteJob[] = [];
@@ -138,15 +172,17 @@ async function getAggregatedRemoteJobs(): Promise<RemoteJob[]> {
   if (remoteJobsCache && remoteJobsCache.expiresAt > now) {
     return remoteJobsCache.data;
   }
-  const [r1, r2, r3] = await Promise.allSettled([
+  const [r1, r2, r3, r4] = await Promise.allSettled([
     fetchRemotive(),
     fetchArbeitnow(),
     fetchRemoteOk(),
+    fetchTheMuse(),
   ]);
   const jobs = dedupeJobs([
     ...(r1.status === "fulfilled" ? r1.value : []),
     ...(r2.status === "fulfilled" ? r2.value : []),
     ...(r3.status === "fulfilled" ? r3.value : []),
+    ...(r4.status === "fulfilled" ? r4.value : []),
   ]);
   remoteJobsCache = { expiresAt: now + REMOTE_JOBS_TTL_MS, data: jobs };
   return jobs;
@@ -167,6 +203,10 @@ export async function listRemoteJobs(req: Request, res: Response) {
         `${j.title} ${j.company} ${j.location} ${j.tags.join(" ")}`.toLowerCase().includes(query),
       );
     }
+    const sourceCounts = jobs.reduce<Record<string, number>>((acc, job) => {
+      acc[job.source] = (acc[job.source] ?? 0) + 1;
+      return acc;
+    }, {});
     const total = jobs.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const normalizedPage = Math.min(page, totalPages);
@@ -177,7 +217,8 @@ export async function listRemoteJobs(req: Request, res: Response) {
       page: normalizedPage,
       limit,
       totalPages,
-      sources: ["remotive", "arbeitnow", "remoteok"],
+      sources: ["remotive", "arbeitnow", "remoteok", "themuse"],
+      sourceCounts,
       cached: true,
     });
   } catch (error) {
