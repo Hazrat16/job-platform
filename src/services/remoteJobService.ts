@@ -1,0 +1,233 @@
+type RemoteJob = {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  url: string;
+  source: "remotive" | "arbeitnow" | "remoteok" | "themuse";
+  tags: string[];
+  publishedAt?: string;
+  salary?: string;
+};
+
+let remoteJobsCache: { expiresAt: number; data: RemoteJob[] } | null = null;
+const REMOTE_JOBS_TTL_MS = 10 * 60 * 1000;
+
+async function fetchRemotive(): Promise<RemoteJob[]> {
+  const res = await fetch("https://remotive.com/api/remote-jobs");
+  if (!res.ok) throw new Error(`Remotive API failed (${res.status})`);
+  const json = (await res.json()) as {
+    jobs?: Array<{
+      id: number;
+      title: string;
+      company_name: string;
+      candidate_required_location?: string;
+      url: string;
+      tags?: string[];
+      publication_date?: string;
+      salary?: string;
+    }>;
+  };
+  return (json.jobs ?? []).map((j) => ({
+    id: `remotive-${j.id}`,
+    title: j.title,
+    company: j.company_name,
+    location: j.candidate_required_location || "Remote",
+    url: j.url,
+    source: "remotive",
+    tags: j.tags ?? [],
+    ...(j.publication_date ? { publishedAt: j.publication_date } : {}),
+    ...(j.salary ? { salary: j.salary } : {}),
+  }));
+}
+
+async function fetchArbeitnow(): Promise<RemoteJob[]> {
+  const res = await fetch("https://www.arbeitnow.com/api/job-board-api");
+  if (!res.ok) throw new Error(`Arbeitnow API failed (${res.status})`);
+  const json = (await res.json()) as {
+    data?: Array<{
+      slug: string;
+      title: string;
+      company_name: string;
+      location?: string;
+      remote?: boolean;
+      url: string;
+      tags?: string[];
+      created_at?: string;
+    }>;
+  };
+  return (json.data ?? [])
+    .filter((j) => j.remote !== false)
+    .map((j) => ({
+      id: `arbeitnow-${j.slug}`,
+      title: j.title,
+      company: j.company_name,
+      location: j.location || "Remote",
+      url: j.url,
+      source: "arbeitnow",
+      tags: j.tags ?? [],
+      ...(j.created_at ? { publishedAt: j.created_at } : {}),
+    }));
+}
+
+async function fetchRemoteOk(): Promise<RemoteJob[]> {
+  const res = await fetch("https://remoteok.com/api", {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "JobPlatformBot/1.0 (+remote-job-ingestion)",
+    },
+  });
+  if (!res.ok) throw new Error(`RemoteOK API failed (${res.status})`);
+  const json = (await res.json()) as Array<
+    | { legal?: string }
+    | {
+        id?: number | string;
+        slug?: string;
+        position?: string;
+        company?: string;
+        location?: string;
+        url?: string;
+        tags?: string[];
+        date?: string;
+        salary_min?: number;
+        salary_max?: number;
+      }
+  >;
+  return (json ?? [])
+    .filter((row): row is Exclude<(typeof json)[number], { legal?: string }> => {
+      return Boolean(row && typeof row === "object" && !("legal" in row));
+    })
+    .map((j) => {
+      const idPart = j.id ?? j.slug ?? `${j.company}-${j.position}`;
+      const salaryText =
+        typeof j.salary_min === "number" || typeof j.salary_max === "number"
+          ? `${j.salary_min ?? "?"} - ${j.salary_max ?? "?"} USD`
+          : undefined;
+      return {
+        id: `remoteok-${String(idPart)}`,
+        title: j.position ?? "Untitled role",
+        company: j.company ?? "Unknown company",
+        location: j.location || "Remote",
+        url: j.url || "https://remoteok.com/",
+        source: "remoteok" as const,
+        tags: Array.isArray(j.tags) ? j.tags : [],
+        ...(j.date ? { publishedAt: j.date } : {}),
+        ...(salaryText ? { salary: salaryText } : {}),
+      };
+    })
+    .filter((job) => Boolean(job.title && job.company && job.url));
+}
+
+async function fetchTheMuse(): Promise<RemoteJob[]> {
+  const res = await fetch("https://www.themuse.com/api/public/jobs?page=1");
+  if (!res.ok) throw new Error(`TheMuse API failed (${res.status})`);
+  const json = (await res.json()) as {
+    results?: Array<{
+      id: number;
+      name: string;
+      locations?: Array<{ name?: string }>;
+      company?: { name?: string };
+      refs?: { landing_page?: string };
+      publication_date?: string;
+      levels?: Array<{ name?: string }>;
+      categories?: Array<{ name?: string }>;
+    }>;
+  };
+  return (json.results ?? []).map((j) => ({
+    id: `themuse-${j.id}`,
+    title: j.name,
+    company: j.company?.name || "Unknown company",
+    location:
+      (j.locations ?? [])
+        .map((l) => l.name)
+        .filter((name): name is string => Boolean(name))
+        .join(" | ") || "Remote / Flexible",
+    url: j.refs?.landing_page || "https://www.themuse.com/jobs",
+    source: "themuse",
+    tags: [
+      ...(j.levels ?? []).map((x) => x.name).filter((x): x is string => Boolean(x)),
+      ...(j.categories ?? []).map((x) => x.name).filter((x): x is string => Boolean(x)),
+    ],
+    ...(j.publication_date ? { publishedAt: j.publication_date } : {}),
+  }));
+}
+
+function dedupeJobs(items: RemoteJob[]): RemoteJob[] {
+  const seen = new Set<string>();
+  const out: RemoteJob[] = [];
+  for (const job of items) {
+    const key = `${job.title.toLowerCase()}|${job.company.toLowerCase()}|${job.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(job);
+  }
+  return out;
+}
+
+async function getAggregatedRemoteJobs(): Promise<RemoteJob[]> {
+  const now = Date.now();
+  if (remoteJobsCache && remoteJobsCache.expiresAt > now) {
+    return remoteJobsCache.data;
+  }
+  const [r1, r2, r3, r4] = await Promise.allSettled([
+    fetchRemotive(),
+    fetchArbeitnow(),
+    fetchRemoteOk(),
+    fetchTheMuse(),
+  ]);
+  const jobs = dedupeJobs([
+    ...(r1.status === "fulfilled" ? r1.value : []),
+    ...(r2.status === "fulfilled" ? r2.value : []),
+    ...(r3.status === "fulfilled" ? r3.value : []),
+    ...(r4.status === "fulfilled" ? r4.value : []),
+  ]);
+  remoteJobsCache = { expiresAt: now + REMOTE_JOBS_TTL_MS, data: jobs };
+  return jobs;
+}
+
+export type RemoteJobListQuery = {
+  search?: string | undefined;
+  source?: string | undefined;
+  limit?: number | undefined;
+  page?: number | undefined;
+};
+
+export async function listRemoteJobs(query: RemoteJobListQuery) {
+  const search = (query.search || "").trim().toLowerCase();
+  const source = (query.source || "").trim();
+  const limit = Math.max(1, Math.min(100, query.limit || 20));
+  const page = Math.max(1, query.page || 1);
+
+  let jobs = await getAggregatedRemoteJobs();
+  if (source) {
+    jobs = jobs.filter((j) => j.source === source);
+  }
+  if (search) {
+    jobs = jobs.filter((j) =>
+      `${j.title} ${j.company} ${j.location} ${j.tags.join(" ")}`.toLowerCase().includes(search),
+    );
+  }
+
+  const sourceCounts = jobs.reduce<Record<string, number>>((acc, job) => {
+    acc[job.source] = (acc[job.source] ?? 0) + 1;
+    return acc;
+  }, {});
+  const total = jobs.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const normalizedPage = Math.min(page, totalPages);
+  const start = (normalizedPage - 1) * limit;
+  const pageData = jobs.slice(start, start + limit);
+
+  return {
+    jobs: pageData,
+    meta: {
+      total,
+      page: normalizedPage,
+      limit,
+      totalPages,
+      sources: ["remotive", "arbeitnow", "remoteok", "themuse"],
+      sourceCounts,
+      cached: true,
+    },
+  };
+}

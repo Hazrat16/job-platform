@@ -1,382 +1,110 @@
-import bcrypt from "bcryptjs";
-import crypto from "crypto";
 import { Request, Response } from "express";
-import mongoose from "mongoose";
-import Session from "../models/sessionModel.js";
-import User from "../models/userModel.js";
+import * as authService from "../services/authService.js";
 import {
   clearRefreshCookie,
-  generateRefreshToken,
   getRequestClientInfo,
-  hashToken,
   readRefreshToken,
-  refreshExpiryDate,
   setRefreshCookie,
-  signAccessToken,
-  timingSafeEqualStrings,
 } from "../utils/authSession.js";
-import { toPublicUser } from "../utils/userPublic.js";
-import { fail, ok } from "../utils/http.js";
-import {
-  sendResetPasswordEmail,
-  sendVerificationEmail,
-} from "../utils/email.js";
-import { enqueueEmail } from "../queues/emailQueue.js";
+import { ok } from "../utils/http.js";
 
 export const registerUser = async (req: Request, res: Response) => {
-  try {
-    const { name, email, password, role } = req.body;
-    const file = req.file;
+  const { name, email, password, role } = req.body;
+  const file = req.file as any;
+  const photoURL: string | undefined =
+    file && "path" in file ? file.path || file.url || file.secure_url : undefined;
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return fail(res, 409, "CONFLICT", "Email already exists");
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const verificationToken = crypto.randomBytes(32).toString("hex");
-
-    let photoURL: string | undefined = undefined;
-    // set uploaded photo URL
-    if (file && "path" in file) {
-      photoURL =
-        (file as any).path || (file as any).url || (file as any).secure_url;
-    }
-
-    const user = await User.create({
-      name,
-      email,
-      password: hashedPassword,
-      role,
-      verificationToken,
-      photo: photoURL,
-    });
-
-    const queued = await enqueueEmail({
-      kind: "verification",
-      to: email,
-      token: verificationToken,
-    });
-    if (!queued) {
-      // No queue available (Redis not configured) — send synchronously as before.
-      const emailSent = await sendVerificationEmail(email, verificationToken);
-      if (!emailSent) {
-        return fail(res, 500, "INTERNAL_ERROR", "Failed to send verification email");
-      }
-    }
-
-    return ok(
-      res,
-      { email },
-      "User registered. Check email to verify.",
-      201,
-    );
-  } catch (err) {
-    console.error(err);
-    return fail(res, 500, "INTERNAL_ERROR", "Registration failed");
-  }
+  const result = await authService.registerUser({
+    name,
+    email,
+    password,
+    role,
+    ...(photoURL ? { photoURL } : {}),
+  });
+  return ok(res, result, "User registered. Check email to verify.", 201);
 };
 
 export const verifyEmail = async (req: Request, res: Response) => {
-  try {
-    const { token } = req.query;
-
-    if (!token || typeof token !== "string") {
-      return fail(res, 400, "BAD_REQUEST", "Token is required");
-    }
-
-    const user = await User.findOne({ verificationToken: token });
-
-    if (!user) return fail(res, 400, "BAD_REQUEST", "Invalid token");
-
-    user.isVerified = true;
-    user.verificationToken = undefined as any;
-    await user.save();
-
-    return ok(res, { verified: true }, "Email verified successfully!");
-  } catch (err) {
-    console.error(" Email verification failed:", err);
-    return fail(res, 500, "INTERNAL_ERROR", "Email verification failed");
-  }
+  const { token } = req.query;
+  const result = await authService.verifyEmail(typeof token === "string" ? token : undefined);
+  return ok(res, result, "Email verified successfully!");
 };
 
 export const loginUser = async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
+  const { email, password } = req.body;
+  const clientInfo = getRequestClientInfo(req);
 
-    const user = await User.findOne({ email });
-    if (!user || !user.isVerified) {
-      return fail(res, 400, "BAD_REQUEST", "Invalid credentials or email not verified");
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return fail(res, 400, "BAD_REQUEST", "Invalid credentials");
-
-    const refreshToken = generateRefreshToken();
-    const refreshTokenHash = hashToken(refreshToken);
-    const expiresAt = refreshExpiryDate();
-    const { userAgent, ipAddress } = getRequestClientInfo(req);
-
-    const session = await Session.create({
-      userId: user._id,
-      refreshTokenHash,
-      userAgent,
-      ipAddress,
-      lastUsedAt: new Date(),
-      expiresAt,
-    });
-
-    const token = signAccessToken({
-      id: String(user._id),
-      role: user.role,
-      sid: String(session._id),
-    });
-    setRefreshCookie(res, refreshToken);
-
-    return ok(
-      res,
-      {
-        token,
-        user: toPublicUser(user),
-      },
-      "Login successful",
-    );
-  } catch (err) {
-    console.error(err);
-    return fail(res, 500, "INTERNAL_ERROR", "Login failed");
-  }
+  const { accessToken, refreshToken, user } = await authService.loginUser(
+    email,
+    password,
+    clientInfo,
+  );
+  setRefreshCookie(res, refreshToken);
+  return ok(res, { token: accessToken, user }, "Login successful");
 };
 
 export const refreshSession = async (req: Request, res: Response) => {
+  const refreshToken = readRefreshToken(req);
   try {
-    const refreshToken = readRefreshToken(req);
-    if (!refreshToken) {
-      clearRefreshCookie(res);
-      return fail(res, 401, "UNAUTHORIZED", "Refresh token is missing");
-    }
-
-    const refreshTokenHash = hashToken(refreshToken);
-    const session = await Session.findOne({
-      refreshTokenHash,
-      revokedAt: { $exists: false },
-      expiresAt: { $gt: new Date() },
-    });
-    if (!session) {
-      clearRefreshCookie(res);
-      return fail(res, 401, "UNAUTHORIZED", "Refresh token is invalid or expired");
-    }
-
-    const user = await User.findById(session.userId);
-    if (!user) {
-      session.revokedAt = new Date();
-      await session.save();
-      clearRefreshCookie(res);
-      return fail(res, 401, "UNAUTHORIZED", "User not found for this session");
-    }
-
-    const nextRefreshToken = generateRefreshToken();
-    session.refreshTokenHash = hashToken(nextRefreshToken);
-    session.lastUsedAt = new Date();
-    session.expiresAt = refreshExpiryDate();
-    await session.save();
-
-    const token = signAccessToken({
-      id: String(user._id),
-      role: user.role,
-      sid: String(session._id),
-    });
-    setRefreshCookie(res, nextRefreshToken);
-
-    return ok(res, { token, user: toPublicUser(user) }, "Session refreshed");
-  } catch (error) {
-    console.error("refreshSession error:", error);
-    return fail(res, 500, "INTERNAL_ERROR", "Failed to refresh session");
+    const result = await authService.refreshSession(refreshToken);
+    setRefreshCookie(res, result.refreshToken);
+    return ok(res, { token: result.accessToken, user: result.user }, "Session refreshed");
+  } catch (err) {
+    clearRefreshCookie(res);
+    throw err;
   }
 };
 
 export const logoutUser = async (req: Request, res: Response) => {
+  const sid = (req as any).user?.sid as string | undefined;
+  const refreshToken = readRefreshToken(req);
   try {
-    const sid = (req as any).user?.sid as string | undefined;
-    const refreshToken = readRefreshToken(req);
-
-    if (sid && mongoose.Types.ObjectId.isValid(sid)) {
-      await Session.updateOne(
-        { _id: sid, revokedAt: { $exists: false } },
-        { $set: { revokedAt: new Date() } },
-      );
-    } else if (refreshToken) {
-      await Session.updateOne(
-        {
-          refreshTokenHash: hashToken(refreshToken),
-          revokedAt: { $exists: false },
-        },
-        { $set: { revokedAt: new Date() } },
-      );
-    }
-
+    await authService.logoutUser(sid, refreshToken);
     clearRefreshCookie(res);
     return ok(res, { loggedOut: true }, "Logged out successfully");
-  } catch (error) {
-    console.error("logoutUser error:", error);
+  } catch (err) {
     clearRefreshCookie(res);
-    return fail(res, 500, "INTERNAL_ERROR", "Failed to logout");
+    throw err;
   }
 };
 
 export const logoutAllSessions = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string | undefined;
   try {
-    const userId = (req as any).user?.id as string | undefined;
-    if (!userId) {
-      clearRefreshCookie(res);
-      return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
-    }
-
-    await Session.updateMany(
-      { userId, revokedAt: { $exists: false } },
-      { $set: { revokedAt: new Date() } },
-    );
+    await authService.logoutAllSessions(userId);
     clearRefreshCookie(res);
     return ok(res, { loggedOutAll: true }, "Logged out from all devices");
-  } catch (error) {
-    console.error("logoutAllSessions error:", error);
+  } catch (err) {
     clearRefreshCookie(res);
-    return fail(res, 500, "INTERNAL_ERROR", "Failed to logout from all devices");
+    throw err;
   }
 };
 
 export const bootstrapAdmin = async (req: Request, res: Response) => {
-  try {
-    const configuredSecret = process.env["ADMIN_BOOTSTRAP_SECRET"];
-    if (!configuredSecret) {
-      return fail(
-        res,
-        503,
-        "SERVICE_UNAVAILABLE",
-        "Admin bootstrap is not configured",
-      );
-    }
+  const providedSecret =
+    req.header("x-admin-bootstrap-secret") ||
+    (typeof req.body?.secret === "string" ? req.body.secret : "");
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "Administrator";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
 
-    const providedSecret =
-      req.header("x-admin-bootstrap-secret") ||
-      (typeof req.body?.secret === "string" ? req.body.secret : "");
-    if (
-      !providedSecret ||
-      !timingSafeEqualStrings(providedSecret, configuredSecret)
-    ) {
-      return fail(res, 403, "FORBIDDEN", "Invalid bootstrap secret");
-    }
-
-    const email =
-      typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
-    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "Administrator";
-    const password =
-      typeof req.body?.password === "string" ? req.body.password : "";
-
-    if (!email || !email.includes("@")) {
-      return fail(res, 400, "BAD_REQUEST", "Valid admin email is required");
-    }
-
-    const existing = await User.findOne({ email });
-    if (existing) {
-      existing.role = "admin";
-      existing.isVerified = true;
-      await existing.save();
-      return ok(
-        res,
-        { id: String(existing._id), email: existing.email, promoted: true },
-        "Existing user promoted to admin",
-      );
-    }
-
-    if (password.length < 6) {
-      return fail(
-        res,
-        400,
-        "BAD_REQUEST",
-        "Password (min 6 chars) is required for new admin user",
-      );
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const adminUser = await User.create({
-      name: name || "Administrator",
-      email,
-      password: hashedPassword,
-      role: "admin",
-      isVerified: true,
-    });
-
-    return ok(
-      res,
-      { id: String(adminUser._id), email: adminUser.email, created: true },
-      "Admin user created",
-      201,
-    );
-  } catch (err) {
-    console.error("bootstrapAdmin error:", err);
-    return fail(res, 500, "INTERNAL_ERROR", "Failed to bootstrap admin user");
-  }
+  const result = await authService.bootstrapAdmin({ providedSecret, email, name, password });
+  const message = result.promoted ? "Existing user promoted to admin" : "Admin user created";
+  return ok(res, result, message, result.created ? 201 : 200);
 };
 
 export const forgotPassword = async (req: Request, res: Response) => {
-  try {
-    const { email } = req.body;
-    const genericResponse = () =>
-      ok(
-        res,
-        { email },
-        "If an account exists for that email, a reset link has been sent.",
-      );
-
-    const user = await User.findOne({ email });
-    if (!user) return genericResponse();
-
-    const token = crypto.randomBytes(32).toString("hex");
-    user.resetPasswordToken = token;
-    user.resetPasswordExpires = new Date(Date.now() + 3600000);
-    await user.save();
-
-    const frontendUrl = process.env["FRONTEND_URL"] || "http://localhost:3000";
-    const resetLink = `${frontendUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
-    const queued = await enqueueEmail({ kind: "reset-password", to: user.email, link: resetLink });
-    if (!queued) {
-      // No queue available (Redis not configured) — send synchronously as before.
-      await sendResetPasswordEmail(user.email, resetLink);
-    }
-
-    return genericResponse();
-  } catch (error) {
-    console.error("Forgot password error:", error);
-    return fail(res, 500, "INTERNAL_ERROR", "Internal server error");
-  }
+  const { email } = req.body;
+  await authService.forgotPassword(email);
+  return ok(
+    res,
+    { email },
+    "If an account exists for that email, a reset link has been sent.",
+  );
 };
 
 export const resetPassword = async (req: Request, res: Response) => {
-  try {
-    const { token, newPassword } = req.body;
-
-    const user = await User.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() },
-    });
-
-    if (!user) {
-      return fail(res, 400, "BAD_REQUEST", "Invalid or expired token");
-    }
-
-    user.password = await bcrypt.hash(newPassword, 12);
-    user.resetPasswordToken = undefined as any;
-    user.resetPasswordExpires = undefined as any;
-    await user.save();
-    await Session.updateMany(
-      { userId: user._id, revokedAt: { $exists: false } },
-      { $set: { revokedAt: new Date() } },
-    );
-    clearRefreshCookie(res);
-
-    return ok(res, { reset: true }, "Password reset successful");
-  } catch (error) {
-    console.error("Reset password error:", error);
-    return fail(res, 500, "INTERNAL_ERROR", "Internal server error");
-  }
+  const { token, newPassword } = req.body;
+  await authService.resetPassword(token, newPassword);
+  return ok(res, { reset: true }, "Password reset successful");
 };
