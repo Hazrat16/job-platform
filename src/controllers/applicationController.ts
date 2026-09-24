@@ -2,12 +2,12 @@ import { Request, Response } from "express";
 import * as applicationService from "../services/applicationService.js";
 import type { AuthUser } from "../services/jobService.js";
 import { ok } from "../utils/http.js";
+import { getUploadedFileUrl } from "../utils/upload.js";
 
 export const applyForJob = async (req: Request, res: Response) => {
   const user = (req as any).user as AuthUser;
   const jobId = req.params["jobId"];
-  const file = req.file as Express.Multer.File | undefined;
-  const resume = file?.path || req.body.resume;
+  const resume = getUploadedFileUrl(req.file) || req.body.resume;
   const coverLetter = req.body.coverLetter;
 
   const application = await applicationService.applyForJob({ jobId, user, resume, coverLetter });

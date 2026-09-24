@@ -5,6 +5,7 @@ import ChatMessage, { type IChatMessage } from "../models/chatModel.js";
 import Conversation from "../models/conversationModel.js";
 import User from "../models/userModel.js";
 import { HttpError } from "../utils/http.js";
+import { logWarn } from "../utils/logger.js";
 
 /** Escapes regex metacharacters so a user's search text is matched literally —
  * passing it straight into `$regex` would let a crafted pattern (e.g. catastrophic
@@ -24,10 +25,14 @@ export type SendChatMessageInput = {
 
 /**
  * Shared by both the REST endpoint and the `send_message` socket event, so the two
- * entry points can't drift into different behavior. Persistence happens
- * asynchronously via the RabbitMQ consumer (chat/consumer.ts); this also attempts
- * immediate delivery to the receiver's live socket, if they have one, since the
- * consumer never touches a live connection.
+ * entry points can't drift into different behavior.
+ *
+ * The message is persisted directly here rather than relying on the RabbitMQ
+ * consumer (chat/consumer.ts) to save it — a request that answers "sent" must not
+ * depend on a message broker being reachable (bootstrap.ts explicitly keeps the
+ * REST API running even when the chat broker fails to connect, and this function
+ * needs to honor that). RabbitMQ/WebSocket delivery below is best-effort fanout on
+ * top of the already-durable write, never a reason to fail the request.
  */
 export async function sendMessage(input: SendChatMessageInput) {
   if (!input.receiverId || !input.message) {
@@ -44,7 +49,7 @@ export async function sendMessage(input: SendChatMessageInput) {
   const attachments = input.attachments || [];
   const clientMessageId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  await ChatProducer.sendMessage({
+  const saved = await ChatMessage.create({
     senderId: input.senderId,
     receiverId: input.receiverId,
     message: input.message,
@@ -54,8 +59,26 @@ export async function sendMessage(input: SendChatMessageInput) {
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
   });
 
+  const conversation = await getOrCreateConversation(input.senderId, input.receiverId);
+  conversation.lastMessage = saved._id as mongoose.Types.ObjectId;
+  conversation.lastMessageAt = timestamp;
+  conversation.incrementUnreadCount(new mongoose.Types.ObjectId(input.receiverId));
+  await conversation.save();
+
+  ChatProducer.publishEvent({
+    type: "message_sent",
+    userId: input.senderId,
+    targetUserId: input.receiverId,
+    conversationId: String(conversation._id),
+    data: { messageId: String(saved._id) },
+    timestamp,
+  }).catch((err) => {
+    logWarn("chat_publish_event_failed", { event: "message_sent", error: String(err) });
+  });
+
   getWebSocketService()?.sendToUser(input.receiverId, "new_message", {
     clientMessageId,
+    messageId: String(saved._id),
     senderId: input.senderId,
     receiverId: input.receiverId,
     message: input.message,
@@ -65,7 +88,7 @@ export async function sendMessage(input: SendChatMessageInput) {
     timestamp,
   });
 
-  return { clientMessageId, timestamp, status: "sent" as const };
+  return { clientMessageId, messageId: String(saved._id), timestamp, status: "sent" as const };
 }
 
 export async function getOrCreateConversation(userId: string, otherUserId: string) {
@@ -241,12 +264,16 @@ export async function markMessagesAsRead(
     }
   }
 
-  await ChatProducer.publishEvent({
+  // Best-effort — the read state above is already durably saved; a broker outage
+  // must never fail this request (see the comment on sendMessage).
+  ChatProducer.publishEvent({
     type: "message_read",
     userId,
     targetUserId: senderId,
     ...(conversationId ? { conversationId } : {}),
     timestamp: new Date(),
+  }).catch((err) => {
+    logWarn("chat_publish_event_failed", { event: "message_read", error: String(err) });
   });
 }
 

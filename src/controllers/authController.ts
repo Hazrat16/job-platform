@@ -7,12 +7,11 @@ import {
   setRefreshCookie,
 } from "../utils/authSession.js";
 import { ok } from "../utils/http.js";
+import { getUploadedFileUrl } from "../utils/upload.js";
 
 export const registerUser = async (req: Request, res: Response) => {
   const { name, email, password, role } = req.body;
-  const file = req.file as any;
-  const photoURL: string | undefined =
-    file && "path" in file ? file.path || file.url || file.secure_url : undefined;
+  const photoURL = getUploadedFileUrl(req.file);
 
   const result = await authService.registerUser({
     name,

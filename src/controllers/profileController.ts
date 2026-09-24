@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import * as profileService from "../services/profileService.js";
 import { ok } from "../utils/http.js";
+import { getUploadedFileUrl } from "../utils/upload.js";
 
 export const getMyProfile = async (req: Request, res: Response) => {
   const userId = (req as any).user?.id as string | undefined;
@@ -17,8 +18,7 @@ export const updateMyProfile = async (req: Request, res: Response) => {
 
 export const uploadProfileResume = async (req: Request, res: Response) => {
   const userId = (req as any).user?.id as string | undefined;
-  const file = req.file as Express.Multer.File | undefined;
-  const data = await profileService.uploadProfileResume(userId, file?.path);
+  const data = await profileService.uploadProfileResume(userId, getUploadedFileUrl(req.file));
   return ok(res, data, "Resume uploaded");
 };
 
