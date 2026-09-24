@@ -25,18 +25,12 @@ import {
 } from "../middlewares/validateRequest.js";
 import { ok, fail } from "../utils/http.js";
 
-function asyncHandler(fn: any) {
-  return (req: any, res: any, next: any) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
-
 const router = Router();
 
 router.post(
   "/bootstrap-admin",
   rateLimit({ key: "auth-bootstrap-admin", windowMs: 60_000, max: 5 }),
-  asyncHandler(bootstrapAdmin),
+  bootstrapAdmin,
 );
 
 router.post(
@@ -44,34 +38,34 @@ router.post(
   rateLimit({ key: "auth-register", windowMs: 60_000, max: 8 }),
   upload.single("photo"),
   validateRegisterInput,
-  asyncHandler(registerUser)
+  registerUser
 );
-router.get("/verify-email", asyncHandler(verifyEmail));
+router.get("/verify-email", verifyEmail);
 router.post(
   "/login",
   rateLimit({ key: "auth-login", windowMs: 60_000, max: 10 }),
   validateLoginInput,
-  asyncHandler(loginUser),
+  loginUser,
 );
 router.post(
   "/forgot-password",
   rateLimit({ key: "auth-forgot", windowMs: 60_000, max: 5 }),
   validateForgotPasswordInput,
-  asyncHandler(forgotPassword),
+  forgotPassword,
 );
 router.post(
   "/reset-password",
   rateLimit({ key: "auth-reset", windowMs: 60_000, max: 8 }),
   validateResetPasswordInput,
-  asyncHandler(resetPassword),
+  resetPassword,
 );
 router.post(
   "/refresh",
   rateLimit({ key: "auth-refresh", windowMs: 60_000, max: 30 }),
-  asyncHandler(refreshSession),
+  refreshSession,
 );
-router.post("/logout", authMiddleware, asyncHandler(logoutUser));
-router.post("/logout-all", authMiddleware, asyncHandler(logoutAllSessions));
+router.post("/logout", authMiddleware, logoutUser);
+router.post("/logout-all", authMiddleware, logoutAllSessions);
 router.post(
   "/upload-photo",
   authMiddleware,
@@ -82,7 +76,7 @@ router.post(
 router.get(
   "/protected",
   authMiddleware,
-  asyncHandler(async (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const userId = (req as any).user?.id as string | undefined;
     if (!userId) {
       return fail(res, 401, "UNAUTHORIZED", "Unauthorized");
@@ -92,7 +86,7 @@ router.get(
       return fail(res, 404, "NOT_FOUND", "User not found");
     }
     return ok(res, toPublicUser(user), "Authorized");
-  }),
+  },
 );
 
 export default router;

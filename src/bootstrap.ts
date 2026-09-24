@@ -29,7 +29,9 @@ function installProcessErrorHandlers(): void {
   process.on("uncaughtException", (err) => {
     logError("uncaught_exception", { error: String(err), stack: (err as Error)?.stack });
     captureException(err);
-    void flushSentry().finally(() => process.exit(1));
+    flushSentry()
+      .catch(() => undefined)
+      .finally(() => process.exit(1));
   });
 
   process.on("unhandledRejection", (reason) => {

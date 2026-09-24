@@ -9,6 +9,18 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_MONGODB_URI: mongodb://127.0.0.1:27017/job-platform-test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,7 +40,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests
+      - name: Tests
         run: npm test
 
       - name: Build

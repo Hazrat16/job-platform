@@ -52,10 +52,18 @@ app.use(
 );
 app.use(requestContext);
 startNotificationWorker();
-void queueJobClosingSoonNotifications();
-const jobClosingSoonInterval = setInterval(() => {
-  void queueJobClosingSoonNotifications();
-}, 6 * 60 * 60 * 1000);
+
+function runJobClosingSoonNotifications(): void {
+  queueJobClosingSoonNotifications().catch((err) => {
+    logError("job_closing_soon_notifications_failed", { error: String(err) });
+  });
+}
+
+runJobClosingSoonNotifications();
+const jobClosingSoonInterval = setInterval(
+  runJobClosingSoonNotifications,
+  6 * 60 * 60 * 1000,
+);
 
 /** Stops app-level background timers (for graceful shutdown). */
 export function stopBackgroundJobs(): void {

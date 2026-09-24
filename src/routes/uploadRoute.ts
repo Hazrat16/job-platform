@@ -1,12 +1,6 @@
 import { Router } from "express";
 import upload from "../middlewares/upload.js";
 
-function asyncHandler(fn: any) {
-  return (req: any, res: any, next: any) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
-
 const router = Router();
 
 router.post("/image", upload.single("file"), (req, res) => {

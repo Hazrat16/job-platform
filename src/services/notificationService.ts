@@ -3,6 +3,7 @@ import Job from "../models/jobModel.js";
 import NotificationJob from "../models/notificationJobModel.js";
 import NotificationPreference from "../models/notificationPreferenceModel.js";
 import Notification, { NotificationType } from "../models/notificationModel.js";
+import { logError } from "../utils/logger.js";
 
 type CreateParams = {
   userId: string;
@@ -137,7 +138,9 @@ export function startNotificationWorker(): void {
   if (notificationWorkerBooted) return;
   notificationWorkerBooted = true;
   notificationWorkerHandle = setInterval(() => {
-    void runNotificationWorkerTick();
+    runNotificationWorkerTick().catch((err) => {
+      logError("notification_worker_tick_failed", { error: String(err) });
+    });
   }, 5_000);
 }
 

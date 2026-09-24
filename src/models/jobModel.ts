@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
-interface ISalary {
+export interface ISalary {
   min: number;
   max: number;
   currency: string;
