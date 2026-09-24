@@ -17,7 +17,9 @@ export interface IJob extends Document {
   requirements: string[];
   benefits: string[];
   employer: Types.ObjectId;
+  companyId?: Types.ObjectId;
   status: "active" | "closed" | "draft";
+  featuredUntil?: Date;
   deletedAt?: Date;
   deletedBy?: Types.ObjectId;
   createdAt: Date;
@@ -62,12 +64,14 @@ const jobSchema = new Schema<IJob>(
     requirements: { type: [String], default: () => [], trim: true },
     benefits: { type: [String], default: () => [], trim: true },
     employer: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    companyId: { type: Schema.Types.ObjectId, ref: "Company", index: true },
     status: {
       type: String,
       enum: ["active", "closed", "draft"],
       default: "active",
       required: true,
     },
+    featuredUntil: { type: Date },
     deletedAt: { type: Date, index: true },
     deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
@@ -89,6 +93,7 @@ const jobSchema = new Schema<IJob>(
 jobSchema.index({ title: "text", company: "text", description: "text", skills: "text" });
 jobSchema.index({ location: 1, type: 1, status: 1, createdAt: -1 });
 jobSchema.index({ employer: 1, createdAt: -1 });
+jobSchema.index({ featuredUntil: -1 });
 
 const Job = mongoose.model<IJob>("Job", jobSchema);
 

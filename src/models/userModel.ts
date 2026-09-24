@@ -88,6 +88,7 @@ export interface IUser extends Document {
   resetPasswordExpires?: Date;
   photo?: string;
   profile?: IUserProfile;
+  companyId?: mongoose.Types.ObjectId;
   isSuspended?: boolean;
   suspendedAt?: Date;
   deletedAt?: Date;
@@ -106,6 +107,7 @@ const userSchema = new Schema<IUser>(
     resetPasswordExpires: { type: Date },
     photo: { type: String },
     profile: { type: profileSchema, default: () => ({}) },
+    companyId: { type: Schema.Types.ObjectId, ref: "Company", index: true },
     isSuspended: { type: Boolean, default: false, index: true },
     suspendedAt: { type: Date },
     deletedAt: { type: Date, index: true },

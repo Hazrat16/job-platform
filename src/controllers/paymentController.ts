@@ -1,13 +1,20 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
+import Job from "../models/jobModel.js";
 import Payment from "../models/paymentModel.js";
 import User from "../models/userModel.js";
 import {
   initiateHostedCheckout,
   validateTransactionByValId,
 } from "../services/sslcommerzService.js";
+import { logError } from "../utils/logger.js";
 
 type JwtUser = { id: string; role: string };
+
+/** Server-controlled pricing — never trust a client-supplied amount for a paid feature. */
+const JOB_BOOST_PRICE_PER_DAY_BDT = 100;
+const JOB_BOOST_MIN_DAYS = 1;
+const JOB_BOOST_MAX_DAYS = 30;
 
 function sslConfig(): {
   storeId: string;
@@ -128,7 +135,25 @@ async function tryCompletePayment(tranId: string, valId: string | undefined) {
     payment.bankTranId = String(validation.bank_tran_id);
   }
   await payment.save();
+
+  if (payment.purpose === "job_boost" && payment.jobId && payment.boostDays) {
+    await applyJobBoost(payment.jobId, payment.boostDays).catch((err) => {
+      logError("job_boost_apply_failed", { paymentId: String(payment._id), error: String(err) });
+    });
+  }
+
   return { ok: true as const, duplicate: false };
+}
+
+/** Extends from the later of "now" or the job's current featuredUntil, so stacking boosts adds up rather than overwriting. */
+async function applyJobBoost(jobId: mongoose.Types.ObjectId, boostDays: number): Promise<void> {
+  const job = await Job.findById(jobId);
+  if (!job) return;
+
+  const now = new Date();
+  const base = job.featuredUntil && job.featuredUntil > now ? job.featuredUntil : now;
+  job.featuredUntil = new Date(base.getTime() + boostDays * 24 * 60 * 60 * 1000);
+  await job.save();
 }
 
 export const initSslCommerz = async (req: Request, res: Response) => {
@@ -150,14 +175,52 @@ export const initSslCommerz = async (req: Request, res: Response) => {
       });
     }
 
-    const rawAmount = (req.body as { amount?: unknown })?.amount;
-    const amount =
-      typeof rawAmount === "number" ? rawAmount : parseFloat(String(rawAmount || ""));
-    if (!Number.isFinite(amount) || amount < 10 || amount > 500_000) {
-      return res.status(400).json({
-        success: false,
-        message: "Amount must be between 10 and 500000 BDT",
-      });
+    const body = req.body as { amount?: unknown; purpose?: unknown; jobId?: unknown; boostDays?: unknown };
+    const purpose = body.purpose === "job_boost" ? "job_boost" : "wallet_topup";
+
+    let amount: number;
+    let jobId: mongoose.Types.ObjectId | undefined;
+    let boostDays: number | undefined;
+    let productName = "Job platform wallet top-up";
+
+    if (purpose === "job_boost") {
+      const jobIdRaw = String(body.jobId || "");
+      if (!mongoose.Types.ObjectId.isValid(jobIdRaw)) {
+        return res.status(400).json({ success: false, message: "A valid jobId is required" });
+      }
+      boostDays = Math.trunc(Number(body.boostDays));
+      if (
+        !Number.isFinite(boostDays) ||
+        boostDays < JOB_BOOST_MIN_DAYS ||
+        boostDays > JOB_BOOST_MAX_DAYS
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: `boostDays must be between ${JOB_BOOST_MIN_DAYS} and ${JOB_BOOST_MAX_DAYS}`,
+        });
+      }
+
+      const job = await Job.findOne({ _id: jobIdRaw, deletedAt: { $exists: false } });
+      if (!job) {
+        return res.status(404).json({ success: false, message: "Job not found" });
+      }
+      if (job.employer.toString() !== jwtUser.id) {
+        return res.status(403).json({ success: false, message: "You don't own this job" });
+      }
+
+      jobId = job._id as mongoose.Types.ObjectId;
+      // Amount is always computed server-side from boostDays — never trust a client-supplied amount for a paid feature.
+      amount = boostDays * JOB_BOOST_PRICE_PER_DAY_BDT;
+      productName = `Featured job boost (${boostDays} day${boostDays === 1 ? "" : "s"}) — ${job.title}`;
+    } else {
+      const rawAmount = body.amount;
+      amount = typeof rawAmount === "number" ? rawAmount : parseFloat(String(rawAmount || ""));
+      if (!Number.isFinite(amount) || amount < 10 || amount > 500_000) {
+        return res.status(400).json({
+          success: false,
+          message: "Amount must be between 10 and 500000 BDT",
+        });
+      }
     }
 
     const user = await User.findById(jwtUser.id).lean();
@@ -192,7 +255,9 @@ export const initSslCommerz = async (req: Request, res: Response) => {
       amount,
       currency: "BDT",
       status: "pending",
-      purpose: "wallet_topup",
+      purpose,
+      jobId,
+      boostDays,
     });
 
     const session = await initiateHostedCheckout({
@@ -206,7 +271,7 @@ export const initSslCommerz = async (req: Request, res: Response) => {
       cancelUrl: `${cbBase}/cancel`,
       ipnUrl: ipnBase,
       customer,
-      productName: "Job platform wallet top-up",
+      productName,
       productCategory: "service",
     });
 

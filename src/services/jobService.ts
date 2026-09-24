@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Application from "../models/applicationModel.js";
 import Job from "../models/jobModel.js";
+import User from "../models/userModel.js";
 import { cacheDeleteByPrefix, cacheGet, cacheSet } from "../utils/apiCache.js";
 import { HttpError } from "../utils/http.js";
 
@@ -142,15 +143,37 @@ export async function listJobs(
   const cached = await cacheGet<{ jobs: unknown[]; meta: Record<string, unknown> }>(cacheKey);
   if (cached) return cached;
 
-  const [jobs, total] = await Promise.all([
-    Job.find(filter)
-      .populate("employer", "name role isVerified photo")
-      .sort(sortConfig)
-      .skip(skip)
-      .limit(limitNumber)
-      .lean(),
-    Job.countDocuments(filter),
+  // Featured (boosted, unexpired) jobs sort first, then the requested sort within each
+  // group — computed via $facet so the featured flag, sort, pagination, and total count
+  // all happen in one aggregation round-trip instead of N+1 queries.
+  const now = new Date();
+  const [aggResult] = await Job.aggregate<{
+    data: unknown[];
+    totalCount: { count: number }[];
+  }>([
+    { $match: filter },
+    {
+      $addFields: {
+        isFeatured: {
+          $cond: [{ $gt: ["$featuredUntil", now] }, 1, 0],
+        },
+      },
+    },
+    { $sort: { isFeatured: -1, ...sortConfig } },
+    {
+      $facet: {
+        data: [{ $skip: skip }, { $limit: limitNumber }],
+        totalCount: [{ $count: "count" }],
+      },
+    },
   ]);
+
+  const rawJobs = aggResult?.data ?? [];
+  const total = aggResult?.totalCount[0]?.count ?? 0;
+  const jobs = await Job.populate(rawJobs, {
+    path: "employer",
+    select: "name role isVerified photo",
+  });
 
   const meta = {
     page: pageNumber,
@@ -211,11 +234,13 @@ export async function createJob(user: AuthUser, body: Record<string, unknown>) {
 
   const picked = pickJobWritableFields(body);
   const skills = normalizeJobSkills(picked["skills"]);
+  const employerUser = await User.findById(user.id).select("companyId").lean();
 
   const job = await Job.create({
     ...picked,
     skills,
     employer: user.id,
+    companyId: employerUser?.companyId,
   });
 
   await cacheDeleteByPrefix("jobs:");

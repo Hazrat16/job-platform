@@ -13,6 +13,8 @@ export interface IPayment extends Document {
   currency: string;
   status: PaymentStatus;
   purpose: string;
+  jobId?: Types.ObjectId;
+  boostDays?: number;
   valId?: string;
   sessionKey?: string;
   bankTranId?: string;
@@ -34,6 +36,8 @@ const paymentSchema = new Schema<IPayment>(
       index: true,
     },
     purpose: { type: String, default: "wallet_topup", trim: true },
+    jobId: { type: Schema.Types.ObjectId, ref: "Job" },
+    boostDays: { type: Number, min: 1, max: 90 },
     valId: { type: String, trim: true },
     sessionKey: { type: String, trim: true },
     bankTranId: { type: String, trim: true },

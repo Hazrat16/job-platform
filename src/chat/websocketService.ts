@@ -182,23 +182,41 @@ export class WebSocketService {
         return;
       }
 
-      // Send message to RabbitMQ
+      const timestamp = new Date();
+      const clientMessageId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
       await ChatProducer.sendMessage({
         senderId: socket.userId,
         receiverId,
         message,
         messageType,
-        timestamp: new Date(),
+        timestamp,
         attachments,
         replyTo,
       });
 
-      // Emit message sent confirmation
-      socket.emit("message_sent", {
-        messageId: `temp_${Date.now()}`,
+      // Persistence (DB save, conversation update, notification) happens asynchronously
+      // via the RabbitMQ consumer — see chat/consumer.ts. That path never touches a live
+      // socket, so deliver the message directly here too, now that it's confirmed queued:
+      // this is the only part of the send flow with a live reference to the receiver's
+      // connection.
+      this.sendToUser(receiverId, "new_message", {
+        clientMessageId,
+        senderId: socket.userId,
         receiverId,
         message,
-        timestamp: new Date(),
+        messageType,
+        attachments,
+        replyTo,
+        timestamp,
+      });
+
+      // Emit message sent confirmation
+      socket.emit("message_sent", {
+        messageId: clientMessageId,
+        receiverId,
+        message,
+        timestamp,
         status: "sent",
       });
 
