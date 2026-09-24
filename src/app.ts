@@ -1,4 +1,6 @@
 import express from "express";
+import cors from "cors";
+import helmet from "helmet";
 import applicationRoutes from "./routes/applicationRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import savedJobRoutes from "./routes/savedJobRoutes.js";
@@ -23,7 +25,36 @@ import { logError, logInfo } from "./utils/logger.js";
 import { snapshotMetrics, trackHttp } from "./utils/metrics.js";
 logInfo("app.ts loaded");
 
+const getAllowedOrigins = (): string[] => {
+  const raw =
+    process.env["CORS_ALLOWED_ORIGINS"] ||
+    process.env["FRONTEND_URL"] ||
+    "http://localhost:3000";
+  return raw
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+};
+const allowedOrigins = getAllowedOrigins();
+
 const app = express();
+app.use(helmet());
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow same-origin/non-browser requests (no Origin header) and configured origins only.
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      logError("cors_origin_rejected", { origin });
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  }),
+);
 app.use(requestContext);
 startNotificationWorker();
 void queueJobClosingSoonNotifications();
@@ -54,25 +85,6 @@ app.use((req, res, next) => {
     });
   });
 
-  const origin = req.headers.origin;
-  if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-  } else {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-  }
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  );
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Requested-With",
-  );
-  if (req.method === "OPTIONS") {
-    res.sendStatus(204);
-    return;
-  }
   next();
 });
 

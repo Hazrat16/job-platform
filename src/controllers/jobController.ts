@@ -5,6 +5,29 @@ import Job from "../models/jobModel.js";
 import { cacheDeleteByPrefix, cacheGet, cacheSet } from "../utils/apiCache.js";
 import { fail, ok } from "../utils/http.js";
 
+const JOB_WRITABLE_FIELDS = [
+  "title",
+  "company",
+  "location",
+  "type",
+  "salary",
+  "description",
+  "skills",
+  "requirements",
+  "benefits",
+] as const;
+
+/** Whitelist client-writable job fields — never let `status`, `employer`, `deletedAt`, etc. through. */
+function pickJobWritableFields(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const field of JOB_WRITABLE_FIELDS) {
+    if (body[field] !== undefined) picked[field] = body[field];
+  }
+  return picked;
+}
+
 function normalizeJobSkills(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   const seen = new Set<string>();
@@ -185,7 +208,7 @@ export const createJob = async (req: Request, res: Response) => {
     }
 
     const user = (req as any).user as { id?: string; role?: string };
-    const body = req.body as Record<string, unknown>;
+    const body = pickJobWritableFields(req.body as Record<string, unknown>);
     const skills = normalizeJobSkills(body["skills"]);
 
     const job = await Job.create({
@@ -220,7 +243,7 @@ export const updateJob = async (req: Request, res: Response) => {
       return fail(res, 403, "FORBIDDEN", "Not authorized to update this job");
     }
 
-    const body = req.body as Record<string, unknown>;
+    const body = pickJobWritableFields(req.body as Record<string, unknown>);
     if (body["skills"] !== undefined) {
       job.set("skills", normalizeJobSkills(body["skills"]));
       delete body["skills"];

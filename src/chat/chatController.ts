@@ -264,7 +264,7 @@ export class ChatController {
         return;
       }
 
-      let searchQuery: any = {
+      const searchQuery: any = {
         $or: [
           { senderId: currentUserId },
           { receiverId: currentUserId },

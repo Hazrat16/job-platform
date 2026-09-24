@@ -1,8 +1,8 @@
 import multer from "multer";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
+import cloudinaryStorage from "multer-storage-cloudinary";
 import cloudinary from "../config/cloudinary.js";
 
-const storage = new CloudinaryStorage({
+const storage = cloudinaryStorage({
   cloudinary,
   params: async (req, file) => {
     const isImage = file.mimetype.startsWith("image/");
@@ -23,6 +23,6 @@ const storage = new CloudinaryStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 export default upload;

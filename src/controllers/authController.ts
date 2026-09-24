@@ -13,6 +13,7 @@ import {
   refreshExpiryDate,
   setRefreshCookie,
   signAccessToken,
+  timingSafeEqualStrings,
 } from "../utils/authSession.js";
 import { toPublicUser } from "../utils/userPublic.js";
 import { fail, ok } from "../utils/http.js";
@@ -31,7 +32,7 @@ export const registerUser = async (req: Request, res: Response) => {
       return fail(res, 409, "CONFLICT", "Email already exists");
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
     const verificationToken = crypto.randomBytes(32).toString("hex");
 
     let photoURL: string | undefined = undefined;
@@ -39,7 +40,6 @@ export const registerUser = async (req: Request, res: Response) => {
     if (file && "path" in file) {
       photoURL =
         (file as any).path || (file as any).url || (file as any).secure_url;
-      console.log("Photo URL:", photoURL);
     }
 
     const user = await User.create({
@@ -52,8 +52,6 @@ export const registerUser = async (req: Request, res: Response) => {
     });
 
     // TODO: Queue email sending here
-    console.log(`Verification token for ${email}: ${verificationToken}`);
-
     const emailSent = await sendVerificationEmail(email, verificationToken);
     if (!emailSent) {
       return fail(res, 500, "INTERNAL_ERROR", "Failed to send verification email");
@@ -75,14 +73,11 @@ export const verifyEmail = async (req: Request, res: Response) => {
   try {
     const { token } = req.query;
 
-    console.log("Token received:", token);
-
     if (!token || typeof token !== "string") {
       return fail(res, 400, "BAD_REQUEST", "Token is required");
     }
 
     const user = await User.findOne({ verificationToken: token });
-    console.log("User found:", user);
 
     if (!user) return fail(res, 400, "BAD_REQUEST", "Invalid token");
 
@@ -256,7 +251,10 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
     const providedSecret =
       req.header("x-admin-bootstrap-secret") ||
       (typeof req.body?.secret === "string" ? req.body.secret : "");
-    if (!providedSecret || providedSecret !== configuredSecret) {
+    if (
+      !providedSecret ||
+      !timingSafeEqualStrings(providedSecret, configuredSecret)
+    ) {
       return fail(res, 403, "FORBIDDEN", "Invalid bootstrap secret");
     }
 
@@ -291,7 +289,7 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
       );
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
     const adminUser = await User.create({
       name: name || "Administrator",
       email,
@@ -315,22 +313,26 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
 export const forgotPassword = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
+    const genericResponse = () =>
+      ok(
+        res,
+        { email },
+        "If an account exists for that email, a reset link has been sent.",
+      );
+
     const user = await User.findOne({ email });
-    if (!user) return fail(res, 404, "NOT_FOUND", "User not found");
+    if (!user) return genericResponse();
 
     const token = crypto.randomBytes(32).toString("hex");
     user.resetPasswordToken = token;
     user.resetPasswordExpires = new Date(Date.now() + 3600000);
     await user.save();
 
-    const resetLink = `http://localhost:3000/reset-password?token=${token}`;
-    const emailSent = await sendResetPasswordEmail(user.email, resetLink);
+    const frontendUrl = process.env["FRONTEND_URL"] || "http://localhost:3000";
+    const resetLink = `${frontendUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
+    await sendResetPasswordEmail(user.email, resetLink);
 
-    if (!emailSent) {
-      return fail(res, 500, "INTERNAL_ERROR", "Failed to send reset email");
-    }
-
-    return ok(res, { email }, "Password reset link sent to your email.");
+    return genericResponse();
   } catch (error) {
     console.error("Forgot password error:", error);
     return fail(res, 500, "INTERNAL_ERROR", "Internal server error");
@@ -350,7 +352,7 @@ export const resetPassword = async (req: Request, res: Response) => {
       return fail(res, 400, "BAD_REQUEST", "Invalid or expired token");
     }
 
-    user.password = await bcrypt.hash(newPassword, 10);
+    user.password = await bcrypt.hash(newPassword, 12);
     user.resetPasswordToken = undefined as any;
     user.resetPasswordExpires = undefined as any;
     await user.save();

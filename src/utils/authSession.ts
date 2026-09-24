@@ -24,6 +24,18 @@ export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+/** Constant-time string comparison (avoids leaking length/prefix via timing). */
+export function timingSafeEqualStrings(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    // Still perform a same-length comparison so the branch above doesn't leak timing either.
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 export function refreshExpiryDate(): Date {
   const d = new Date();
   d.setDate(d.getDate() + REFRESH_TTL_DAYS);

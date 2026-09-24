@@ -141,7 +141,7 @@ export const rewriteResumeFit = async (req: Request, res: Response) => {
       jobId?: string;
     };
 
-    let resumeText = (rawResume || "").trim();
+    const resumeText = (rawResume || "").trim();
     const jobDescriptionExtra = (rawJob || "").trim();
     const jid = (jobId || "").trim();
 

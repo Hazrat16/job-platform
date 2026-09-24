@@ -1,5 +1,5 @@
 import { Router } from "express";
-import upload from "../middlewares/upload";
+import upload from "../middlewares/upload.js";
 
 function asyncHandler(fn: any) {
   return (req: any, res: any, next: any) => {

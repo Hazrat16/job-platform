@@ -1,5 +1,5 @@
-# Use Node.js 18 Alpine for smaller image size
-FROM node:18-alpine
+# Use Node.js 20 (current LTS) Alpine for smaller image size
+FROM node:20-alpine
 
 # Set working directory
 WORKDIR /app
@@ -45,5 +45,6 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5000/api/test || exit 1
 
-# Start the application
-CMD ["npm", "start"]
+# Start the application from the compiled build (tsx is a dev-only dependency,
+# pruned above, so the runtime entrypoint must be plain compiled JS).
+CMD ["node", "dist/startChatServer.js"]
