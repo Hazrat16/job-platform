@@ -1,10 +1,13 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
+import { createAdapter } from "@socket.io/redis-adapter";
+import IORedis from "ioredis";
 import jwt from "jsonwebtoken";
 import { ChatProducer } from "./producer.js";
 import ChatMessage from "../models/chatModel.js";
 import Conversation from "../models/conversationModel.js";
 import { getAllowedOrigins } from "../config/corsOrigins.js";
+import { logError, logInfo } from "../utils/logger.js";
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -21,6 +24,7 @@ export class WebSocketService {
   private io: SocketIOServer;
   private connectedUsers: Map<string, AuthenticatedSocket> = new Map();
   private userRooms: Map<string, Set<string>> = new Map();
+  private redisAdapterClients: IORedis[] = [];
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -32,8 +36,30 @@ export class WebSocketService {
       transports: ["websocket", "polling"],
     });
 
+    this.setupRedisAdapter();
     this.setupMiddleware();
     this.setupEventHandlers();
+  }
+
+  /**
+   * Without this, Socket.IO keeps connected-socket and room state in the process's own
+   * memory, so broadcasts/rooms never reach sockets connected to a different instance —
+   * horizontal scaling silently breaks. Falls back to the default in-memory adapter
+   * (single-instance only, current behavior) when REDIS_URL isn't configured.
+   */
+  private setupRedisAdapter(): void {
+    const REDIS_URL = process.env["REDIS_URL"];
+    if (!REDIS_URL) return;
+
+    const pubClient = new IORedis(REDIS_URL);
+    const subClient = pubClient.duplicate();
+    this.redisAdapterClients = [pubClient, subClient];
+
+    pubClient.on("error", (err) => logError("socketio_redis_adapter_error", { client: "pub", error: String(err) }));
+    subClient.on("error", (err) => logError("socketio_redis_adapter_error", { client: "sub", error: String(err) }));
+
+    this.io.adapter(createAdapter(pubClient, subClient));
+    logInfo("socketio_redis_adapter_enabled");
   }
 
   /**
@@ -431,5 +457,8 @@ export class WebSocketService {
   public async close(): Promise<void> {
     this.io.disconnectSockets(true);
     await new Promise<void>((resolve) => this.io.close(() => resolve()));
+    for (const client of this.redisAdapterClients) {
+      await client.quit().catch(() => client.disconnect());
+    }
   }
 }

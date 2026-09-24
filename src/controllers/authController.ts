@@ -21,6 +21,7 @@ import {
   sendResetPasswordEmail,
   sendVerificationEmail,
 } from "../utils/email.js";
+import { enqueueEmail } from "../queues/emailQueue.js";
 
 export const registerUser = async (req: Request, res: Response) => {
   try {
@@ -51,10 +52,17 @@ export const registerUser = async (req: Request, res: Response) => {
       photo: photoURL,
     });
 
-    // TODO: Queue email sending here
-    const emailSent = await sendVerificationEmail(email, verificationToken);
-    if (!emailSent) {
-      return fail(res, 500, "INTERNAL_ERROR", "Failed to send verification email");
+    const queued = await enqueueEmail({
+      kind: "verification",
+      to: email,
+      token: verificationToken,
+    });
+    if (!queued) {
+      // No queue available (Redis not configured) — send synchronously as before.
+      const emailSent = await sendVerificationEmail(email, verificationToken);
+      if (!emailSent) {
+        return fail(res, 500, "INTERNAL_ERROR", "Failed to send verification email");
+      }
     }
 
     return ok(
@@ -330,7 +338,11 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     const frontendUrl = process.env["FRONTEND_URL"] || "http://localhost:3000";
     const resetLink = `${frontendUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
-    await sendResetPasswordEmail(user.email, resetLink);
+    const queued = await enqueueEmail({ kind: "reset-password", to: user.email, link: resetLink });
+    if (!queued) {
+      // No queue available (Redis not configured) — send synchronously as before.
+      await sendResetPasswordEmail(user.email, resetLink);
+    }
 
     return genericResponse();
   } catch (error) {

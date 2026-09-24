@@ -7,6 +7,8 @@ import { closeRabbitMQ, connectRabbitMQ } from "./chat/rabbitMQ.js";
 import { WebSocketService } from "./chat/websocketService.js";
 import { closeRedis, getRedis } from "./config/redis.js";
 import { captureException, flushSentry, initSentry } from "./config/sentry.js";
+import { closeEmailQueue } from "./queues/emailQueue.js";
+import { startEmailWorker, stopEmailWorker } from "./queues/emailWorker.js";
 import { logError, logInfo } from "./utils/logger.js";
 
 const PORT = process.env["PORT"] || 5000;
@@ -56,6 +58,7 @@ export const startServer = async () => {
     // use) so health checks reflect real state quickly and early requests aren't slowed
     // by a cold connect. Fully optional: cache/rate-limit fall back to in-process state.
     getRedis();
+    startEmailWorker(); // no-op if REDIS_URL isn't configured
 
     const MONGODB_URI =
       process.env["MONGODB_URI"] ||
@@ -145,6 +148,8 @@ export const startServer = async () => {
         }
 
         await closeRabbitMQ();
+        await stopEmailWorker();
+        await closeEmailQueue();
         await closeRedis();
 
         if (mongoose.connection.readyState !== 0) {
