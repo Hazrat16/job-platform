@@ -1,5 +1,7 @@
 import Redis from "ioredis";
-import { logError, logInfo, logWarn } from "../utils/logger.js";
+import { logError, logInfo, logWarn, logWarnThrottled, resetLogThrottle } from "../utils/logger.js";
+
+const RETRY_LOG_INTERVAL_MS = 60_000;
 
 let client: Redis | null = null;
 let ready = false;
@@ -24,14 +26,20 @@ export function getRedis(): Redis | null {
     });
     client.on("ready", () => {
       ready = true;
+      resetLogThrottle("redis_connect_retry");
       logInfo("redis_connected");
     });
     client.on("error", (err) => {
       if (ready) {
         logError("redis_error", { error: String(err) });
-      } else {
-        logWarn("redis_connect_retry", { error: String(err) });
+        return;
       }
+      // Retries continue indefinitely in the background (Redis may come back later),
+      // but log at most once a minute instead of on every attempt — otherwise a
+      // long-unavailable Redis floods the log forever with an identical warning.
+      logWarnThrottled("redis_connect_retry", RETRY_LOG_INTERVAL_MS, "redis_connect_retry", {
+        error: String(err),
+      });
     });
     client.on("close", () => {
       if (ready) logWarn("redis_connection_closed");

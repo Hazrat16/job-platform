@@ -4,10 +4,13 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import IORedis from "ioredis";
 import jwt from "jsonwebtoken";
 import { ChatProducer } from "./producer.js";
-import ChatMessage from "../models/chatModel.js";
 import Conversation from "../models/conversationModel.js";
 import { getAllowedOrigins } from "../config/corsOrigins.js";
-import { logError, logInfo } from "../utils/logger.js";
+import { logInfo, logWarnThrottled } from "../utils/logger.js";
+import * as chatService from "../services/chatService.js";
+import { HttpError } from "../utils/http.js";
+
+const REDIS_ADAPTER_ERROR_LOG_INTERVAL_MS = 60_000;
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -51,12 +54,33 @@ export class WebSocketService {
     const REDIS_URL = process.env["REDIS_URL"];
     if (!REDIS_URL) return;
 
-    const pubClient = new IORedis(REDIS_URL);
+    // maxRetriesPerRequest: null is required here, not just a nicety — the adapter
+    // issues its own subscribe command internally on subClient, outside our control.
+    // With the default limit (20), that queued command eventually gives up and
+    // rejects while the connection is still down, and since we never see that
+    // promise directly, it surfaces as an unhandled rejection instead of a
+    // catchable error. `null` makes it wait on the connection's own retry policy
+    // rather than a fixed per-command attempt count.
+    const pubClient = new IORedis(REDIS_URL, { maxRetriesPerRequest: null });
     const subClient = pubClient.duplicate();
     this.redisAdapterClients = [pubClient, subClient];
 
-    pubClient.on("error", (err) => logError("socketio_redis_adapter_error", { client: "pub", error: String(err) }));
-    subClient.on("error", (err) => logError("socketio_redis_adapter_error", { client: "sub", error: String(err) }));
+    pubClient.on("error", (err) =>
+      logWarnThrottled(
+        "socketio_redis_adapter_error:pub",
+        REDIS_ADAPTER_ERROR_LOG_INTERVAL_MS,
+        "socketio_redis_adapter_error",
+        { client: "pub", error: String(err) },
+      ),
+    );
+    subClient.on("error", (err) =>
+      logWarnThrottled(
+        "socketio_redis_adapter_error:sub",
+        REDIS_ADAPTER_ERROR_LOG_INTERVAL_MS,
+        "socketio_redis_adapter_error",
+        { client: "sub", error: String(err) },
+      ),
+    );
 
     this.io.adapter(createAdapter(pubClient, subClient));
     logInfo("socketio_redis_adapter_enabled");
@@ -176,55 +200,30 @@ export class WebSocketService {
 
       const { receiverId, message, messageType = "text", attachments = [], replyTo } = data;
 
-      // Validate input
-      if (!receiverId || !message) {
-        socket.emit("error", { message: "Missing required fields" });
-        return;
-      }
-
-      const timestamp = new Date();
-      const clientMessageId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-      await ChatProducer.sendMessage({
-        senderId: socket.userId,
-        receiverId,
-        message,
-        messageType,
-        timestamp,
-        attachments,
-        replyTo,
-      });
-
-      // Persistence (DB save, conversation update, notification) happens asynchronously
-      // via the RabbitMQ consumer — see chat/consumer.ts. That path never touches a live
-      // socket, so deliver the message directly here too, now that it's confirmed queued:
-      // this is the only part of the send flow with a live reference to the receiver's
-      // connection.
-      this.sendToUser(receiverId, "new_message", {
-        clientMessageId,
+      // Delegates to the same service function the REST /chat/send endpoint uses,
+      // so the two entry points can't drift into different behavior (persistence
+      // via RabbitMQ, best-effort direct delivery to the receiver's live socket).
+      const result = await chatService.sendMessage({
         senderId: socket.userId,
         receiverId,
         message,
         messageType,
         attachments,
         replyTo,
-        timestamp,
       });
 
-      // Emit message sent confirmation
       socket.emit("message_sent", {
-        messageId: clientMessageId,
+        messageId: result.clientMessageId,
         receiverId,
         message,
-        timestamp,
-        status: "sent",
+        timestamp: result.timestamp,
+        status: result.status,
       });
 
       console.log(`📤 Message sent from ${socket.userId} to ${receiverId}`);
-      
     } catch (error) {
-      console.error("❌ Error sending message:", error);
-      socket.emit("error", { message: "Failed to send message" });
+      const errorMessage = error instanceof HttpError ? error.message : "Failed to send message";
+      socket.emit("error", { message: errorMessage });
     }
   }
 
@@ -287,23 +286,19 @@ export class WebSocketService {
 
       const { senderId, conversationId } = data;
 
-      // Send read event to RabbitMQ
-      await ChatProducer.publishEvent({
-        type: "message_read",
-        userId: socket.userId,
-        targetUserId: senderId,
-        conversationId,
-        timestamp: new Date(),
-      });
+      // Delegates to the same service function the REST /chat/mark-read endpoint
+      // uses — this previously only published an event/room broadcast here without
+      // ever updating ChatMessage.isRead or the conversation's unread count, so a
+      // client relying solely on the socket path never actually had its unread
+      // state persisted.
+      await chatService.markMessagesAsRead(socket.userId, senderId, conversationId);
 
-      // Emit to conversation room
       if (conversationId) {
         socket.to(`conversation:${conversationId}`).emit("messages_read", {
           userId: socket.userId,
           timestamp: new Date(),
         });
       }
-      
     } catch (error) {
       console.error("❌ Error marking messages as read:", error);
     }
@@ -469,6 +464,16 @@ export class WebSocketService {
    */
   public isUserConnected(userId: string): boolean {
     return this.connectedUsers.has(userId);
+  }
+
+  /**
+   * IDs of every user with an active connection on this instance. In a
+   * horizontally-scaled deployment (Redis adapter enabled) this only reflects
+   * sockets connected to *this* process — there's no cross-instance presence
+   * registry, only cross-instance message/event delivery.
+   */
+  public getConnectedUserIds(): string[] {
+    return Array.from(this.connectedUsers.keys());
   }
 
   /** Disconnects all sockets and shuts down the Socket.IO server (for graceful shutdown). */

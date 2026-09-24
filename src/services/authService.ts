@@ -13,6 +13,7 @@ import {
 } from "../utils/authSession.js";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../utils/email.js";
 import { HttpError } from "../utils/http.js";
+import { logWarn } from "../utils/logger.js";
 import { toPublicUser, type PublicUser } from "../utils/userPublic.js";
 
 const BCRYPT_ROUNDS = 12;
@@ -43,16 +44,21 @@ export async function registerUser(input: RegisterInput): Promise<{ email: strin
     photo: input.photoURL,
   });
 
+  // The account is already created above — email delivery is best-effort from here
+  // on and must never fail the registration response. A user who fails silently
+  // here can still request a new verification email or reset flow later; a user
+  // who gets a 500 for an account that actually exists just gets confused and
+  // retries into a 409 CONFLICT.
   const queued = await enqueueEmail({
     kind: "verification",
     to: input.email,
     token: verificationToken,
   });
   if (!queued) {
-    // No queue available (Redis not configured) — send synchronously as before.
+    // No queue available (Redis not configured) — send synchronously instead.
     const emailSent = await sendVerificationEmail(input.email, verificationToken);
     if (!emailSent) {
-      throw new HttpError(500, "INTERNAL_ERROR", "Failed to send verification email");
+      logWarn("registration_verification_email_failed", { email: input.email });
     }
   }
 

@@ -5,6 +5,7 @@ import app, { stopBackgroundJobs } from "./app.js";
 import { ChatConsumer } from "./chat/consumer.js";
 import { closeRabbitMQ, connectRabbitMQ } from "./chat/rabbitMQ.js";
 import { WebSocketService } from "./chat/websocketService.js";
+import { clearWebSocketService, setWebSocketService } from "./chat/websocketRegistry.js";
 import { closeRedis, getRedis } from "./config/redis.js";
 import { captureException, flushSentry, initSentry } from "./config/sentry.js";
 import { closeEmailQueue } from "./queues/emailQueue.js";
@@ -85,6 +86,7 @@ export const startServer = async () => {
     if (mongoConnected) {
       try {
         wsService = new WebSocketService(httpServer);
+        setWebSocketService(wsService);
         console.log("✅ WebSocket service initialized");
 
         await connectRabbitMQ();
@@ -144,6 +146,7 @@ export const startServer = async () => {
 
         if (wsService) {
           await wsService.close();
+          clearWebSocketService();
           console.log("✅ WebSocket server closed");
         }
 

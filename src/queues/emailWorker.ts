@@ -1,8 +1,10 @@
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../utils/email.js";
-import { logError, logInfo, logWarn } from "../utils/logger.js";
+import { logError, logInfo, logWarnThrottled } from "../utils/logger.js";
 import { QUEUE_NAME, type EmailJobData } from "./emailQueue.js";
+
+const REDIS_ERROR_LOG_INTERVAL_MS = 60_000;
 
 let worker: Worker<EmailJobData> | null = null;
 let connection: IORedis | null = null;
@@ -14,7 +16,9 @@ export function startEmailWorker(): void {
 
   connection = new IORedis(REDIS_URL, { maxRetriesPerRequest: null });
   connection.on("error", (err) => {
-    logWarn("email_worker_redis_error", { error: String(err) });
+    logWarnThrottled("email_worker_redis_error", REDIS_ERROR_LOG_INTERVAL_MS, "email_worker_redis_error", {
+      error: String(err),
+    });
   });
 
   worker = new Worker<EmailJobData>(
