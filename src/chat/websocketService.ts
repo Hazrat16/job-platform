@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { ChatProducer } from "./producer.js";
 import ChatMessage from "../models/chatModel.js";
 import Conversation from "../models/conversationModel.js";
+import { getAllowedOrigins } from "../config/corsOrigins.js";
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -24,7 +25,7 @@ export class WebSocketService {
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: process.env["CLIENT_URL"] || "http://localhost:3000",
+        origin: getAllowedOrigins(),
         methods: ["GET", "POST"],
         credentials: true,
       },
@@ -424,5 +425,11 @@ export class WebSocketService {
    */
   public isUserConnected(userId: string): boolean {
     return this.connectedUsers.has(userId);
+  }
+
+  /** Disconnects all sockets and shuts down the Socket.IO server (for graceful shutdown). */
+  public async close(): Promise<void> {
+    this.io.disconnectSockets(true);
+    await new Promise<void>((resolve) => this.io.close(() => resolve()));
   }
 }

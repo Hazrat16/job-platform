@@ -236,3 +236,5 @@ export default rabbitMQService;
 // Legacy export for backward compatibility
 export const connectRabbitMQ = () => rabbitMQService.connect();
 export const getChannel = () => rabbitMQService.getChannel();
+export const isRabbitMQConnected = () => rabbitMQService.isConnectionActive();
+export const closeRabbitMQ = () => rabbitMQService.close();

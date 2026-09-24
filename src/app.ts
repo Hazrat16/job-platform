@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { getAllowedOrigins } from "./config/corsOrigins.js";
 import applicationRoutes from "./routes/applicationRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import savedJobRoutes from "./routes/savedJobRoutes.js";
@@ -16,25 +17,19 @@ import externalJobRoutes from "./routes/externalJobRoutes.js";
 import remoteJobRoutes from "./routes/remoteJobRoutes.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 import { requestContext } from "./middlewares/requestContext.js";
+import { sanitizeInput } from "./middlewares/sanitizeInput.js";
 import {
   queueJobClosingSoonNotifications,
   startNotificationWorker,
+  stopNotificationWorker,
 } from "./services/notificationService.js";
 import mongoose from "mongoose";
 import { logError, logInfo } from "./utils/logger.js";
 import { snapshotMetrics, trackHttp } from "./utils/metrics.js";
+import { pingRedis } from "./config/redis.js";
+import { isRabbitMQConnected } from "./chat/rabbitMQ.js";
 logInfo("app.ts loaded");
 
-const getAllowedOrigins = (): string[] => {
-  const raw =
-    process.env["CORS_ALLOWED_ORIGINS"] ||
-    process.env["FRONTEND_URL"] ||
-    "http://localhost:3000";
-  return raw
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-};
 const allowedOrigins = getAllowedOrigins();
 
 const app = express();
@@ -58,9 +53,15 @@ app.use(
 app.use(requestContext);
 startNotificationWorker();
 void queueJobClosingSoonNotifications();
-setInterval(() => {
+const jobClosingSoonInterval = setInterval(() => {
   void queueJobClosingSoonNotifications();
 }, 6 * 60 * 60 * 1000);
+
+/** Stops app-level background timers (for graceful shutdown). */
+export function stopBackgroundJobs(): void {
+  clearInterval(jobClosingSoonInterval);
+  stopNotificationWorker();
+}
 
 app.use((req, res, next) => {
   const startedAt = Date.now();
@@ -89,6 +90,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+app.use(sanitizeInput);
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/upload", uploadRoute);
@@ -109,8 +111,12 @@ app.get("/api/test", (req, res) => {
   });
 });
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
   const dbConnected = mongoose.connection.readyState === 1;
+  const [redisConnected, rabbitmqConnected] = await Promise.all([
+    pingRedis(),
+    Promise.resolve(isRabbitMQConnected()),
+  ]);
   const status = dbConnected ? "ok" : "degraded";
   res.status(dbConnected ? 200 : 503).json({
     success: dbConnected,
@@ -118,21 +124,35 @@ app.get("/api/health", (_req, res) => {
     services: {
       api: "up",
       db: dbConnected ? "up" : "down",
+      redis: redisConnected ? "up" : "down",
+      rabbitmq: rabbitmqConnected ? "up" : "down",
     },
     timestamp: new Date().toISOString(),
   });
 });
 
-app.get("/api/health/ready", (_req, res) => {
-  const ready = mongoose.connection.readyState === 1;
-  if (!ready) {
+app.get("/api/health/ready", async (_req, res) => {
+  const dbConnected = mongoose.connection.readyState === 1;
+  if (!dbConnected) {
     return res.status(503).json({
       success: false,
       status: "not_ready",
       reason: "Database not connected",
     });
   }
-  return res.json({ success: true, status: "ready" });
+  const [redisConnected, rabbitmqConnected] = await Promise.all([
+    pingRedis(),
+    Promise.resolve(isRabbitMQConnected()),
+  ]);
+  return res.json({
+    success: true,
+    status: "ready",
+    services: {
+      db: "up",
+      redis: redisConnected ? "up" : "down",
+      rabbitmq: rabbitmqConnected ? "up" : "down",
+    },
+  });
 });
 
 app.get("/api/metrics", (_req, res) => {

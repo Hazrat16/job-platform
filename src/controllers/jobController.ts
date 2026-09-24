@@ -103,7 +103,7 @@ export const getJobs = async (req: Request, res: Response) => {
 
     const sortConfig = JOB_SORT_MAP[sort] || JOB_SORT_MAP["recent"];
     const cacheKey = `jobs:list:${req.originalUrl}`;
-    const cached = cacheGet<{ jobs: unknown[]; meta: Record<string, unknown> }>(cacheKey);
+    const cached = await cacheGet<{ jobs: unknown[]; meta: Record<string, unknown> }>(cacheKey);
     if (cached) {
       return ok(res, cached.jobs, "Jobs fetched successfully", 200, cached.meta);
     }
@@ -124,7 +124,7 @@ export const getJobs = async (req: Request, res: Response) => {
       total,
       totalPages: Math.ceil(total / limitNumber),
     };
-    cacheSet(cacheKey, { jobs, meta }, JOB_LIST_CACHE_TTL_MS);
+    await cacheSet(cacheKey, { jobs, meta }, JOB_LIST_CACHE_TTL_MS);
     return ok(res, jobs, "Jobs fetched successfully", 200, meta);
   } catch (error) {
     console.error("getJobs error:", error);
@@ -180,7 +180,7 @@ export const getJobById = async (req: Request, res: Response) => {
     }
 
     const cacheKey = `jobs:details:${req.params["id"]}`;
-    const cached = cacheGet<unknown>(cacheKey);
+    const cached = await cacheGet<unknown>(cacheKey);
     if (cached) {
       return ok(res, cached, "Job fetched successfully");
     }
@@ -193,7 +193,7 @@ export const getJobById = async (req: Request, res: Response) => {
       return fail(res, 404, "NOT_FOUND", "Job not found");
     }
 
-    cacheSet(cacheKey, job, JOB_DETAILS_CACHE_TTL_MS);
+    await cacheSet(cacheKey, job, JOB_DETAILS_CACHE_TTL_MS);
     return ok(res, job, "Job fetched successfully");
   } catch (error) {
     console.error("getJobById error:", error);
@@ -218,7 +218,7 @@ export const createJob = async (req: Request, res: Response) => {
     });
 
     const createdJob = job.toObject();
-    cacheDeleteByPrefix("jobs:");
+    await cacheDeleteByPrefix("jobs:");
     return ok(res, createdJob, "Job created successfully", 201);
   } catch (error) {
     console.error("createJob error:", error);
@@ -252,7 +252,7 @@ export const updateJob = async (req: Request, res: Response) => {
     await job.save();
 
     const updatedJob = job.toObject();
-    cacheDeleteByPrefix("jobs:");
+    await cacheDeleteByPrefix("jobs:");
     return ok(res, updatedJob, "Job updated successfully");
   } catch (error) {
     console.error("updateJob error:", error);
@@ -283,7 +283,7 @@ export const deleteJob = async (req: Request, res: Response) => {
     };
     if (user.id) update["deletedBy"] = new mongoose.Types.ObjectId(user.id);
     await Job.updateOne({ _id: job.id }, { $set: update });
-    cacheDeleteByPrefix("jobs:");
+    await cacheDeleteByPrefix("jobs:");
     return ok(res, { id: job.id }, "Job archived successfully");
   } catch (error) {
     console.error("deleteJob error:", error);
@@ -321,7 +321,7 @@ export const updateJobLifecycleStatus = async (req: Request, res: Response) => {
       "employer",
       "name role isVerified photo",
     );
-    cacheDeleteByPrefix("jobs:");
+    await cacheDeleteByPrefix("jobs:");
 
     const statusLabel =
       status === "active" ? "published" : status === "closed" ? "closed" : "saved as draft";

@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { fail, HttpError } from "../utils/http.js";
 import { logError } from "../utils/logger.js";
+import { captureException } from "../config/sentry.js";
 
 export function notFoundHandler(req: Request, res: Response) {
   return fail(res, 404, "NOT_FOUND", `Route not found: ${req.method} ${req.originalUrl}`);
@@ -24,5 +25,6 @@ export function errorHandler(
     path: req.originalUrl,
     error: err,
   });
+  captureException(err);
   return fail(res, 500, "INTERNAL_ERROR", "Something went wrong");
 }
